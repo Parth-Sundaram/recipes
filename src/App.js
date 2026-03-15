@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, Settings, X, Repeat } from 'lucide-react';
+import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, Repeat } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
@@ -19,7 +19,6 @@ function GroceryMealPlanner() {
   const [recurringItems, setRecurringItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
   const [user, setUser] = useState(null);
   const [showAuth, setShowAuth] = useState(true);
   const [authMode, setAuthMode] = useState('login');
