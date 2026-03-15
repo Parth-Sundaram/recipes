@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, X, Repeat, Edit2, Check, PlusCircle } from 'lucide-react';
+import {
+  Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat,
+  Database, X, Repeat, Edit2, Check, PlusCircle, Share2, Utensils,
+  Sparkles, BarChart2, FlameIcon
+} from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
@@ -25,6 +29,165 @@ function recalcPantryMatch(recipe, pantryItems) {
   return { ...recipe, ingredients, matchPercentage };
 }
 
+function parseMacroValue(val) {
+  if (!val || val === 'N/A') return 0;
+  return parseFloat(String(val).replace(/[^0-9.]/g, '')) || 0;
+}
+
+// ─── Shared Recipe Modal ─────────────────────────────────────────────────────
+
+function SharedRecipeModal({ recipe, onSave, onClose, isLoggedIn }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+        <div className="flex justify-between items-center p-6 border-b border-emerald-100">
+          <h2 className="text-xl font-bold text-emerald-800 flex items-center gap-2">
+            <Share2 className="w-5 h-5" /> Shared Recipe
+          </h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+          {recipe.thumbnail && <img src={recipe.thumbnail} alt={recipe.name} className="w-full h-40 object-cover rounded-lg" />}
+          <div>
+            <h3 className="text-2xl font-bold text-emerald-800">{recipe.name}</h3>
+            <div className="flex gap-3 mt-2 text-sm text-emerald-600 flex-wrap">
+              <span>⏱️ {recipe.prepTime}</span>
+              <span>🍽️ {recipe.servings} servings</span>
+              <span>💪 {recipe.protein}</span>
+              <span>🥑 {recipe.fat}</span>
+              {recipe.carbs && <span>🌾 {recipe.carbs}</span>}
+            </div>
+          </div>
+          <div>
+            <h4 className="font-semibold text-emerald-700 mb-2">Ingredients</h4>
+            <ul className="space-y-1">
+              {recipe.ingredients.map((ing, i) => (
+                <li key={i} className="text-sm text-emerald-700">• {ing.amount} {ing.item}</li>
+              ))}
+            </ul>
+          </div>
+          {recipe.instructions?.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-emerald-700 mb-2">Instructions</h4>
+              <ol className="list-decimal list-inside space-y-1 text-sm text-emerald-700">
+                {recipe.instructions.map((s, i) => <li key={i}>{s}</li>)}
+              </ol>
+            </div>
+          )}
+        </div>
+        <div className="p-6 border-t border-emerald-100">
+          {isLoggedIn ? (
+            <button onClick={() => onSave(recipe)}
+              className="w-full py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium flex items-center justify-center gap-2">
+              <Heart className="w-4 h-4" /> Save to My Recipes
+            </button>
+          ) : (
+            <p className="text-center text-emerald-600 text-sm">Log in to save this recipe to your collection.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Nutrition Modal ─────────────────────────────────────────────────────────
+
+function NutritionModal({ recipe, onClose }) {
+  const nutrition = recipe.nutritionDetails;
+
+  const MacroBar = ({ label, value, max, color }) => {
+    const pct = Math.min((value / max) * 100, 100);
+    return (
+      <div className="mb-3">
+        <div className="flex justify-between text-sm mb-1">
+          <span className="text-emerald-700 font-medium">{label}</span>
+          <span className="text-emerald-600">{value}g</span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-2">
+          <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+        <div className="flex justify-between items-center p-6 border-b border-emerald-100">
+          <h2 className="text-xl font-bold text-emerald-800 flex items-center gap-2">
+            <BarChart2 className="w-5 h-5" /> Nutrition Analysis — {recipe.name}
+          </h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          {!nutrition ? (
+            <p className="text-emerald-600 text-sm text-center py-4">
+              No detailed nutrition data available for this recipe. Use the AI Estimate button when creating/editing a custom recipe to generate estimates.
+            </p>
+          ) : (
+            <>
+              {/* Calorie banner */}
+              <div className="bg-emerald-50 rounded-xl p-4 text-center">
+                <div className="text-4xl font-bold text-emerald-700">{nutrition.calories || parseMacroValue(recipe.protein) * 4 + parseMacroValue(recipe.fat) * 9 + parseMacroValue(recipe.carbs) * 4}</div>
+                <div className="text-emerald-600 text-sm">calories per serving</div>
+              </div>
+
+              {/* Macros */}
+              <div className="bg-white border border-emerald-100 rounded-xl p-4">
+                <h3 className="font-semibold text-emerald-800 mb-3">Macronutrients</h3>
+                <MacroBar label="Protein" value={parseMacroValue(recipe.protein)} max={60} color="bg-blue-400" />
+                <MacroBar label="Total Fat" value={parseMacroValue(recipe.fat)} max={65} color="bg-yellow-400" />
+                <MacroBar label="Carbohydrates" value={parseMacroValue(recipe.carbs)} max={130} color="bg-orange-400" />
+                {nutrition.fiber && <MacroBar label="Fiber" value={parseMacroValue(nutrition.fiber)} max={30} color="bg-green-400" />}
+                {nutrition.sugar && <MacroBar label="Sugars" value={parseMacroValue(nutrition.sugar)} max={50} color="bg-pink-400" />}
+                {nutrition.addedSugar && <MacroBar label="Added Sugars" value={parseMacroValue(nutrition.addedSugar)} max={25} color="bg-red-400" />}
+              </div>
+
+              {/* Fats breakdown */}
+              {(nutrition.saturatedFat || nutrition.unsaturatedFat || nutrition.transFat) && (
+                <div className="bg-white border border-emerald-100 rounded-xl p-4">
+                  <h3 className="font-semibold text-emerald-800 mb-3">Fat Breakdown</h3>
+                  {nutrition.saturatedFat && <MacroBar label="Saturated Fat" value={parseMacroValue(nutrition.saturatedFat)} max={20} color="bg-red-300" />}
+                  {nutrition.unsaturatedFat && <MacroBar label="Unsaturated Fat" value={parseMacroValue(nutrition.unsaturatedFat)} max={45} color="bg-green-300" />}
+                  {nutrition.transFat && <MacroBar label="Trans Fat" value={parseMacroValue(nutrition.transFat)} max={2} color="bg-red-500" />}
+                </div>
+              )}
+
+              {/* Vitamins & Minerals */}
+              {(nutrition.vitaminA || nutrition.vitaminC || nutrition.vitaminD || nutrition.calcium || nutrition.iron || nutrition.potassium || nutrition.sodium) && (
+                <div className="bg-white border border-emerald-100 rounded-xl p-4">
+                  <h3 className="font-semibold text-emerald-800 mb-3">Vitamins & Minerals</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: 'Sodium', val: nutrition.sodium, unit: 'mg' },
+                      { label: 'Potassium', val: nutrition.potassium, unit: 'mg' },
+                      { label: 'Calcium', val: nutrition.calcium, unit: 'mg' },
+                      { label: 'Iron', val: nutrition.iron, unit: 'mg' },
+                      { label: 'Vitamin A', val: nutrition.vitaminA, unit: 'mcg' },
+                      { label: 'Vitamin C', val: nutrition.vitaminC, unit: 'mg' },
+                      { label: 'Vitamin D', val: nutrition.vitaminD, unit: 'mcg' },
+                      { label: 'Vitamin B12', val: nutrition.vitaminB12, unit: 'mcg' },
+                    ].filter(i => i.val).map(({ label, val, unit }) => (
+                      <div key={label} className="bg-emerald-50 rounded-lg p-2 text-center">
+                        <div className="text-sm font-semibold text-emerald-700">{val}{unit}</div>
+                        <div className="text-xs text-emerald-500">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {nutrition.aiGenerated && (
+                <p className="text-xs text-center text-gray-400">⚠️ Nutrition values are AI-estimated and may not be exact.</p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 function GroceryMealPlanner() {
@@ -45,6 +208,8 @@ function GroceryMealPlanner() {
   const [supabase, setSupabase] = useState(null);
   const [newItem, setNewItem] = useState({ name: '', quantity: '', unit: 'units' });
   const [showCreateRecipe, setShowCreateRecipe] = useState(false);
+  const [sharedRecipe, setSharedRecipe] = useState(null); // recipe from URL param
+  const [nutritionRecipe, setNutritionRecipe] = useState(null); // recipe for nutrition modal
 
   const loadAllData = useCallback(async (client, userId) => {
     try {
@@ -53,21 +218,34 @@ function GroceryMealPlanner() {
       const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', userId);
       const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', userId);
       const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', userId);
-
       if (pantry) setPantryItems(pantry);
       if (saved) setSavedRecipes(saved.map(r => JSON.parse(r.recipe_data)));
       if (plan) setMealPlan(plan.map(r => JSON.parse(r.recipe_data)));
       if (shopping) setShoppingList(shopping);
       if (recurring) setRecurringItems(recurring);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    }
+    } catch (error) { console.error('Error loading data:', error); }
   }, []);
 
   const initializeSupabase = useCallback((url, key) => {
     try {
       const client = createClient(url, key);
       setSupabase(client);
+
+      // Check for shared recipe in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const recipeParam = urlParams.get('recipe');
+      if (recipeParam) {
+        try {
+          const decoded = JSON.parse(atob(recipeParam));
+          setSharedRecipe(decoded);
+        } catch (e) {
+          // Check Supabase shared_recipes table
+          client.from('shared_recipes').select('recipe_data').eq('share_id', recipeParam).single()
+            .then(({ data }) => {
+              if (data) setSharedRecipe(JSON.parse(data.recipe_data));
+            });
+        }
+      }
 
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const accessToken = hashParams.get('access_token');
@@ -148,15 +326,58 @@ function GroceryMealPlanner() {
     } catch (error) { alert('Error logging out: ' + error.message); }
   };
 
+  // ── Share Recipe ──────────────────────────────────────────────────────────
+
+  const shareRecipe = async (recipe) => {
+    try {
+      // Save to shared_recipes table and use the ID as share key
+      const shareId = Math.random().toString(36).substring(2, 10);
+      if (supabase) {
+        await supabase.from('shared_recipes').insert([{
+          share_id: shareId,
+          recipe_data: JSON.stringify(recipe),
+          created_at: new Date().toISOString()
+        }]);
+      }
+      const url = `${window.location.origin}${window.location.pathname}?recipe=${shareId}`;
+      await navigator.clipboard.writeText(url);
+      alert('Share link copied to clipboard!');
+    } catch (e) {
+      // Fallback: encode recipe in URL directly
+      const encoded = btoa(JSON.stringify(recipe));
+      const url = `${window.location.origin}${window.location.pathname}?recipe=${encoded}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        alert('Share link copied to clipboard!');
+      } catch {
+        prompt('Copy this share link:', url);
+      }
+    }
+  };
+
+  const saveSharedRecipe = async (recipe) => {
+    if (!supabase || !user) return;
+    const cleaned = { ...recipe, id: Date.now() + Math.random(), source: recipe.source || 'Shared' };
+    const withMatch = recalcPantryMatch(cleaned, pantryItems);
+    const { data, error } = await supabase.from('saved_recipes').insert([{
+      user_id: user.id, recipe_data: JSON.stringify(withMatch), created_at: new Date().toISOString()
+    }]).select();
+    if (!error && data) {
+      setSavedRecipes([...savedRecipes, withMatch]);
+      setSharedRecipe(null);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      alert('Recipe saved!');
+      setActiveTab('saved');
+    }
+  };
+
   // ── Pantry ────────────────────────────────────────────────────────────────
 
   const addPantryItem = async () => {
     if (!newItem.name || !newItem.quantity || !supabase || !user) return;
     const item = {
-      user_id: user.id,
-      name: newItem.name.toLowerCase().trim(),
-      quantity: parseFloat(newItem.quantity),
-      unit: newItem.unit,
+      user_id: user.id, name: newItem.name.toLowerCase().trim(),
+      quantity: parseFloat(newItem.quantity), unit: newItem.unit,
       created_at: new Date().toISOString()
     };
     const { data, error } = await supabase.from('pantry').insert([item]).select();
@@ -175,6 +396,26 @@ function GroceryMealPlanner() {
     if (!error) setPantryItems(pantryItems.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
+  // Subtract ingredients from pantry after cooking
+  const subtractFromPantry = async (recipe) => {
+    if (!supabase || !user) return;
+    const updatedPantry = [...pantryItems];
+    for (const ing of recipe.ingredients) {
+      if (!ing.inPantry) continue;
+      const pantryItem = updatedPantry.find(p =>
+        p.name.toLowerCase().includes(ing.item.toLowerCase()) ||
+        ing.item.toLowerCase().includes(p.name.toLowerCase())
+      );
+      if (!pantryItem) continue;
+      const ingQty = parseFloat(String(ing.amount).replace(/[^0-9.]/g, '')) || 1;
+      const newQty = Math.max(0, pantryItem.quantity - ingQty);
+      await supabase.from('pantry').update({ quantity: newQty }).eq('id', pantryItem.id);
+      pantryItem.quantity = newQty;
+    }
+    setPantryItems([...updatedPantry]);
+    alert(`Pantry updated! Ingredients for "${recipe.name}" have been subtracted.`);
+  };
+
   // ── Recipe Suggestions (Groq AI) ──────────────────────────────────────────
 
   const getRecipeSuggestions = async () => {
@@ -190,16 +431,14 @@ function GroceryMealPlanner() {
           model: "llama-3.3-70b-versatile",
           messages: [{
             role: "user",
-            content: `I have these pantry items: ${pantryList}\n\nGenerate 5 recipe suggestions that use as many of my pantry items as possible, are high protein, low fat, low preservatives, healthy and clean eating focused.\n\nRespond ONLY with a JSON array (no markdown, no preamble):\n[\n  {\n    "name": "Recipe Name",\n    "prepTime": "20 min",\n    "servings": 4,\n    "protein": "35g",\n    "fat": "8g",\n    "ingredients": [\n      {"item": "ingredient name", "amount": "quantity", "inPantry": true}\n    ],\n    "instructions": ["step 1", "step 2"],\n    "matchPercentage": 75\n  }\n]`
+            content: `I have these pantry items: ${pantryList}\n\nGenerate 5 recipe suggestions that use as many of my pantry items as possible, are high protein, low fat, low preservatives, healthy and clean eating focused.\n\nRespond ONLY with a JSON array (no markdown, no preamble):\n[\n  {\n    "name": "Recipe Name",\n    "prepTime": "20 min",\n    "servings": 4,\n    "protein": "35g",\n    "fat": "8g",\n    "carbs": "30g",\n    "ingredients": [\n      {"item": "ingredient name", "amount": "quantity", "inPantry": true}\n    ],\n    "instructions": ["step 1", "step 2"],\n    "matchPercentage": 75\n  }\n]`
           }],
-          temperature: 0.7,
-          max_tokens: 4000
+          temperature: 0.7, max_tokens: 4000
         })
       });
       const data = await response.json();
       let recipeText = data.choices[0].message.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const parsedRecipes = JSON.parse(recipeText);
-      setRecipes(parsedRecipes.map(r => ({ ...r, id: Date.now() + Math.random() })));
+      setRecipes(JSON.parse(recipeText).map(r => ({ ...r, id: Date.now() + Math.random() })));
     } catch (error) {
       console.error('Error getting recipes:', error);
       alert('Error generating recipes. Please check your Groq API key and try again.');
@@ -212,6 +451,12 @@ function GroceryMealPlanner() {
     if (!searchQuery.trim()) return;
     setIsLoading(true);
     let allRecipes = [];
+
+    // First: search saved recipes locally
+    const savedMatches = savedRecipes.filter(r =>
+      r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.ingredients?.some(i => i.item.toLowerCase().includes(searchQuery.toLowerCase()))
+    ).map(r => ({ ...r, source: r.source || 'Saved', _fromSaved: true }));
 
     try {
       // SOURCE 1: Spoonacular
@@ -230,6 +475,7 @@ function GroceryMealPlanner() {
                 prepTime: `${recipe.readyInMinutes || 30} min`, servings: recipe.servings || 4,
                 protein: `${Math.round(recipe.nutrition?.nutrients?.find(n => n.name === 'Protein')?.amount || 25)}g`,
                 fat: `${Math.round(recipe.nutrition?.nutrients?.find(n => n.name === 'Fat')?.amount || 12)}g`,
+                carbs: `${Math.round(recipe.nutrition?.nutrients?.find(n => n.name === 'Carbohydrates')?.amount || 30)}g`,
                 ingredients, instructions: recipe.analyzedInstructions?.[0]?.steps?.map(s => s.step) || ['See full recipe for detailed instructions'],
                 matchPercentage: ingredients.length > 0 ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100) : 0,
                 thumbnail: recipe.image, source: 'Spoonacular'
@@ -257,6 +503,7 @@ function GroceryMealPlanner() {
                 prepTime: `${recipe.totalTime || 30} min`, servings: recipe.yield || 4,
                 protein: `${Math.round(recipe.totalNutrients?.PROCNT?.quantity || 25)}g`,
                 fat: `${Math.round(recipe.totalNutrients?.FAT?.quantity || 12)}g`,
+                carbs: `${Math.round(recipe.totalNutrients?.CHOCDF?.quantity || 30)}g`,
                 ingredients, instructions: ['Visit source for full instructions: ' + recipe.url],
                 matchPercentage: ingredients.length > 0 ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100) : 0,
                 thumbnail: recipe.image, source: 'Edamam', url: recipe.url
@@ -286,12 +533,10 @@ function GroceryMealPlanner() {
             }
             return {
               id: Date.now() + Math.random(), name: meal.strMeal,
-              prepTime: "30 min", servings: 4, protein: "25g", fat: "12g",
-              ingredients,
-              instructions: meal.strInstructions.split('\n').filter(s => s.trim()),
+              prepTime: "30 min", servings: 4, protein: "25g", fat: "12g", carbs: "30g",
+              ingredients, instructions: meal.strInstructions.split('\n').filter(s => s.trim()),
               matchPercentage: ingredients.length > 0 ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100) : 0,
-              category: meal.strCategory, area: meal.strArea,
-              thumbnail: meal.strMealThumb, source: 'TheMealDB'
+              category: meal.strCategory, area: meal.strArea, thumbnail: meal.strMealThumb, source: 'TheMealDB'
             };
           });
           allRecipes = [...allRecipes, ...mealRecipes];
@@ -299,7 +544,7 @@ function GroceryMealPlanner() {
       } catch (e) { console.log('TheMealDB failed:', e.message); }
 
       // SOURCE 4: Groq AI fallback
-      if (allRecipes.length === 0) {
+      if (allRecipes.length === 0 && savedMatches.length === 0) {
         if (!GROQ_API_KEY) { alert('No recipes found. Please add API keys.'); setIsLoading(false); return; }
         const pantryList = pantryItems.map(i => i.name).join(', ');
         const aiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -309,7 +554,7 @@ function GroceryMealPlanner() {
             model: "llama-3.3-70b-versatile",
             messages: [{
               role: "user",
-              content: `Generate 5 recipes for: "${searchQuery}"\n\nMy pantry items: ${pantryList || 'none'}\n\nRespond ONLY with a JSON array (no markdown, no preamble):\n[\n  {\n    "name": "Recipe Name",\n    "prepTime": "20 min",\n    "servings": 4,\n    "protein": "35g",\n    "fat": "8g",\n    "ingredients": [{"item": "ingredient name", "amount": "quantity", "inPantry": false}],\n    "instructions": ["step 1", "step 2"],\n    "matchPercentage": 50\n  }\n]`
+              content: `Generate 5 recipes for: "${searchQuery}"\n\nMy pantry items: ${pantryList || 'none'}\n\nRespond ONLY with a JSON array (no markdown):\n[\n  {\n    "name": "Recipe Name",\n    "prepTime": "20 min",\n    "servings": 4,\n    "protein": "35g",\n    "fat": "8g",\n    "carbs": "30g",\n    "ingredients": [{"item": "ingredient name", "amount": "quantity", "inPantry": false}],\n    "instructions": ["step 1", "step 2"],\n    "matchPercentage": 50\n  }\n]`
             }],
             temperature: 0.7, max_tokens: 4000
           })
@@ -319,12 +564,19 @@ function GroceryMealPlanner() {
         allRecipes = JSON.parse(recipeText).map(r => ({ ...r, id: Date.now() + Math.random(), source: 'AI Generated' }));
       }
 
-      const unique = allRecipes.reduce((acc, recipe) => {
+      // Deduplicate external results
+      const uniqueExternal = allRecipes.reduce((acc, recipe) => {
         if (!acc.find(r => r.name.toLowerCase() === recipe.name.toLowerCase())) acc.push(recipe);
         return acc;
       }, []);
-      unique.sort((a, b) => b.matchPercentage - a.matchPercentage);
-      setRecipes(unique);
+      uniqueExternal.sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+      // Saved recipes go first, then external — deduplicate across both
+      const externalFiltered = uniqueExternal.filter(r =>
+        !savedMatches.find(s => s.name.toLowerCase() === r.name.toLowerCase())
+      );
+
+      setRecipes([...savedMatches, ...externalFiltered]);
     } catch (error) {
       console.error('Error searching recipes:', error);
       alert('Error searching recipes: ' + error.message);
@@ -347,8 +599,7 @@ function GroceryMealPlanner() {
     if (!supabase || !user) return;
     const withMatch = recalcPantryMatch(updatedRecipe, pantryItems);
     const original = savedRecipes.find(r => r.id === updatedRecipe.id);
-    const { error } = await supabase
-      .from('saved_recipes')
+    const { error } = await supabase.from('saved_recipes')
       .update({ recipe_data: JSON.stringify(withMatch) })
       .eq('user_id', user.id)
       .eq('recipe_data', JSON.stringify(original));
@@ -358,11 +609,8 @@ function GroceryMealPlanner() {
   const removeSavedRecipe = async (recipeId) => {
     if (!supabase || !user) return;
     const recipe = savedRecipes.find(r => r.id === recipeId);
-    const { error } = await supabase
-      .from('saved_recipes')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('recipe_data', JSON.stringify(recipe));
+    const { error } = await supabase.from('saved_recipes').delete()
+      .eq('user_id', user.id).eq('recipe_data', JSON.stringify(recipe));
     if (!error) setSavedRecipes(savedRecipes.filter(r => r.id !== recipeId));
   };
 
@@ -393,8 +641,16 @@ function GroceryMealPlanner() {
   const removeFromMealPlan = async (plannedId) => {
     if (!supabase || !user) return;
     const recipe = mealPlan.find(r => r.plannedId === plannedId);
-    const { error } = await supabase.from('meal_plan').delete().eq('user_id', user.id).eq('recipe_data', JSON.stringify(recipe));
+    const { error } = await supabase.from('meal_plan').delete()
+      .eq('user_id', user.id).eq('recipe_data', JSON.stringify(recipe));
     if (!error) setMealPlan(mealPlan.filter(r => r.plannedId !== plannedId));
+  };
+
+  const markAsCooked = async (recipe) => {
+    const confirmed = window.confirm(`Mark "${recipe.name}" as cooked? This will subtract ingredients from your pantry.`);
+    if (!confirmed) return;
+    await subtractFromPantry(recipe);
+    await removeFromMealPlan(recipe.plannedId);
   };
 
   const addMissingToShoppingList = async (recipe) => {
@@ -409,6 +665,19 @@ function GroceryMealPlanner() {
     const { data, error } = await supabase.from('shopping_list').insert(newItems).select();
     if (!error && data) { setShoppingList([...shoppingList, ...data]); setActiveTab('shopping'); }
   };
+
+  // ── Meal Plan Macro Summary ───────────────────────────────────────────────
+
+  const mealPlanMacros = mealPlan.reduce((acc, recipe) => ({
+    protein: acc.protein + parseMacroValue(recipe.protein),
+    fat: acc.fat + parseMacroValue(recipe.fat),
+    carbs: acc.carbs + parseMacroValue(recipe.carbs),
+    calories: acc.calories + (
+      parseMacroValue(recipe.protein) * 4 +
+      parseMacroValue(recipe.fat) * 9 +
+      parseMacroValue(recipe.carbs) * 4
+    )
+  }), { protein: 0, fat: 0, carbs: 0, calories: 0 });
 
   // ── Shopping List ─────────────────────────────────────────────────────────
 
@@ -434,7 +703,18 @@ function GroceryMealPlanner() {
 
   // ── Recurring Items ───────────────────────────────────────────────────────
 
-  const addRecurringItem = async (item, amount, frequency = 'weekly') => {
+  const addManualShoppingItem = async (name, amount) => {
+    if (!supabase || !user || !name.trim()) return;
+    const newEntry = {
+      user_id: user.id, item: name.toLowerCase().trim(),
+      amount: amount.trim() || '1', recipe: 'Manual',
+      purchased: false, created_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase.from('shopping_list').insert([newEntry]).select();
+    if (!error && data) setShoppingList([...shoppingList, data[0]]);
+  };
+
+    const addRecurringItem = async (item, amount, frequency = 'weekly') => {
     if (!supabase || !item || !amount) return;
     const newRecurring = {
       user_id: user.id, item: item.toLowerCase().trim(),
@@ -473,7 +753,7 @@ function GroceryMealPlanner() {
       recipe: `Recurring (${item.frequency})`, purchased: false, created_at: new Date().toISOString()
     }));
     const { data, error } = await supabase.from('shopping_list').insert(newItems).select();
-    if (!error && data) { setShoppingList([...shoppingList, ...data]); alert(`Added ${activeItems.length} recurring items to shopping list!`); }
+    if (!error && data) { setShoppingList([...shoppingList, ...data]); alert(`Added ${activeItems.length} recurring items!`); }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -487,11 +767,10 @@ function GroceryMealPlanner() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold text-emerald-800 flex items-center gap-3">
-                <ChefHat className="w-8 h-8" />
-                Smart Grocery & Meal Planner
+                <ChefHat className="w-8 h-8" /> Smart Grocery & Meal Planner
               </h1>
               <p className="text-emerald-600 mt-2">
-              Meal planning with cloud sync
+                AI-powered meal planning with cloud sync
                 {user && <span className="ml-2">• {user.email}</span>}
               </p>
             </div>
@@ -502,6 +781,21 @@ function GroceryMealPlanner() {
             )}
           </div>
         </header>
+
+        {/* Shared Recipe Modal */}
+        {sharedRecipe && (
+          <SharedRecipeModal
+            recipe={sharedRecipe}
+            onSave={saveSharedRecipe}
+            onClose={() => { setSharedRecipe(null); window.history.replaceState({}, document.title, window.location.pathname); }}
+            isLoggedIn={!!user}
+          />
+        )}
+
+        {/* Nutrition Modal */}
+        {nutritionRecipe && (
+          <NutritionModal recipe={nutritionRecipe} onClose={() => setNutritionRecipe(null)} />
+        )}
 
         {/* Auth Modal */}
         {showAuth && (
@@ -550,30 +844,25 @@ function GroceryMealPlanner() {
 
         {/* Create Recipe Modal */}
         {showCreateRecipe && (
-          <CreateRecipeModal
-            pantryItems={pantryItems}
-            onSave={saveCustomRecipe}
-            onClose={() => setShowCreateRecipe(false)}
-          />
+          <CreateRecipeModal pantryItems={pantryItems} onSave={saveCustomRecipe} onClose={() => setShowCreateRecipe(false)} />
         )}
 
         {/* Navigation Tabs */}
         <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
           {[
-            { id: 'pantry', label: 'Pantry Inventory', icon: Database },
-            { id: 'recipes', label: 'Recipe Suggestions', icon: ChefHat },
-            { id: 'saved', label: 'Saved Recipes', icon: Heart },
+            { id: 'pantry', label: 'Pantry', icon: Database },
+            { id: 'recipes', label: 'Recipes', icon: ChefHat },
+            { id: 'saved', label: 'Saved', icon: Heart },
             { id: 'mealPlan', label: 'Meal Plan', icon: Calendar },
-            { id: 'shopping', label: 'Shopping List', icon: ShoppingCart },
-            { id: 'recurring', label: 'Recurring Items', icon: Repeat }
+            { id: 'shopping', label: 'Shopping', icon: ShoppingCart },
+            { id: 'recurring', label: 'Recurring', icon: Repeat }
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.id ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-emerald-700 hover:bg-emerald-50'
               }`}
             >
-              <tab.icon className="w-4 h-4" />
-              {tab.label}
+              <tab.icon className="w-4 h-4" />{tab.label}
             </button>
           ))}
         </div>
@@ -595,7 +884,7 @@ function GroceryMealPlanner() {
               <select value={newItem.unit} onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
                 className="px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               >
-                {['units','lbs','oz','cups','tbsp','tsp'].map(u => <option key={u} value={u}>{u}</option>)}
+                {['units','lbs','oz','cups','tbsp','tsp','g','kg','ml','l'].map(u => <option key={u} value={u}>{u}</option>)}
               </select>
               <button onClick={addPantryItem} className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
                 <Plus className="w-4 h-4" /> Add
@@ -615,9 +904,8 @@ function GroceryMealPlanner() {
                     <input type="number" value={item.quantity} onChange={(e) => updatePantryItem(item.id, 'quantity', parseFloat(e.target.value))}
                       className="w-24 px-3 py-1 bg-white border border-emerald-200 rounded" />
                     <select value={item.unit} onChange={(e) => updatePantryItem(item.id, 'unit', e.target.value)}
-                      className="px-3 py-1 bg-white border border-emerald-200 rounded"
-                    >
-                      {['units','lbs','oz','cups','tbsp','tsp'].map(u => <option key={u} value={u}>{u}</option>)}
+                      className="px-3 py-1 bg-white border border-emerald-200 rounded">
+                      {['units','lbs','oz','cups','tbsp','tsp','g','kg','ml','l'].map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
                     <button onClick={() => removePantryItem(item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded">
                       <Trash2 className="w-4 h-4" />
@@ -640,7 +928,7 @@ function GroceryMealPlanner() {
         {activeTab === 'recipes' && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl shadow-lg p-6">
-              <h2 className="text-2xl font-bold text-emerald-800 mb-4">Search Recipe Database</h2>
+              <h2 className="text-2xl font-bold text-emerald-800 mb-4">Search Recipes</h2>
               <div className="flex gap-3">
                 <input type="text" placeholder="Search recipes (e.g., 'chicken tikka masala', 'pasta')"
                   value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
@@ -653,7 +941,7 @@ function GroceryMealPlanner() {
                   <Search className="w-4 h-4" /> Search
                 </button>
               </div>
-              <p className="text-xs text-emerald-600 mt-2">Powered by Spoonacular · Edamam · TheMealDB · AI fallback</p>
+              <p className="text-xs text-emerald-600 mt-2">Searches your saved recipes first, then Spoonacular · Edamam · TheMealDB · AI fallback</p>
             </div>
             {isLoading && (
               <div className="text-center py-12 bg-white rounded-2xl shadow-lg">
@@ -673,6 +961,9 @@ function GroceryMealPlanner() {
                   onSave={() => saveRecipe(recipe)}
                   onAddToPlan={() => addToMealPlan(recipe)}
                   onAddToShopping={() => addMissingToShoppingList(recipe)}
+                  onShare={() => shareRecipe(recipe)}
+                  onNutrition={() => setNutritionRecipe(recipe)}
+                  alreadySaved={!!savedRecipes.find(r => r.name === recipe.name)}
                 />
               ))}
             </div>
@@ -685,8 +976,7 @@ function GroceryMealPlanner() {
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-2xl font-bold text-emerald-800">Saved Recipes</h2>
               <button onClick={() => setShowCreateRecipe(true)}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium"
-              >
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
                 <PlusCircle className="w-4 h-4" /> Create Recipe
               </button>
             </div>
@@ -703,9 +993,10 @@ function GroceryMealPlanner() {
                     onAddToShopping={() => addMissingToShoppingList(recipe)}
                     onDelete={() => removeSavedRecipe(recipe.id)}
                     onUpdate={updateSavedRecipe}
+                    onShare={() => shareRecipe(recipe)}
+                    onNutrition={() => setNutritionRecipe(recipe)}
                     pantryItems={pantryItems}
-                    isSaved
-                    isEditable
+                    isSaved isEditable
                   />
                 ))}
               </div>
@@ -715,33 +1006,75 @@ function GroceryMealPlanner() {
 
         {/* ── Meal Plan Tab ── */}
         {activeTab === 'mealPlan' && (
-          <div className="bg-white rounded-2xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold text-emerald-800 mb-4">Weekly Meal Plan</h2>
-            {mealPlan.length === 0 ? (
-              <div className="text-center py-12 text-emerald-600">
-                <Calendar className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                <p>No meals planned yet. Add recipes from the Recipes or Saved tabs!</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {mealPlan.map(recipe => (
-                  <div key={recipe.plannedId} className="border border-emerald-200 rounded-lg p-4">
-                    <div className="flex justify-between items-start mb-3">
-                      <h3 className="text-lg font-bold text-emerald-800">{recipe.name}</h3>
-                      <button onClick={() => removeFromMealPlan(recipe.plannedId)} className="p-2 text-red-600 hover:bg-red-50 rounded">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+          <div className="space-y-6">
+            {/* Weekly Macro Summary */}
+            {mealPlan.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h3 className="text-lg font-bold text-emerald-800 mb-4 flex items-center gap-2">
+                  <BarChart2 className="w-5 h-5" /> Weekly Macro Summary
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Calories', value: Math.round(mealPlanMacros.calories), unit: 'kcal', color: 'bg-orange-50 border-orange-200 text-orange-700' },
+                    { label: 'Protein', value: Math.round(mealPlanMacros.protein), unit: 'g', color: 'bg-blue-50 border-blue-200 text-blue-700' },
+                    { label: 'Fat', value: Math.round(mealPlanMacros.fat), unit: 'g', color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+                    { label: 'Carbs', value: Math.round(mealPlanMacros.carbs), unit: 'g', color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                  ].map(({ label, value, unit, color }) => (
+                    <div key={label} className={`border rounded-xl p-4 text-center ${color}`}>
+                      <div className="text-2xl font-bold">{value}<span className="text-sm font-normal ml-1">{unit}</span></div>
+                      <div className="text-sm mt-1 opacity-80">{label}</div>
+                      <div className="text-xs mt-1 opacity-60">~{Math.round(value / 7)}{unit}/day</div>
                     </div>
-                    <button onClick={() => addMissingToShoppingList(recipe)}
-                      className="w-full py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 flex items-center justify-center gap-2 font-medium"
-                    >
-                      <ShoppingCart className="w-4 h-4" />
-                      Add Missing Ingredients to Shopping List
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
+
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="text-2xl font-bold text-emerald-800 mb-4">Weekly Meal Plan</h2>
+              {mealPlan.length === 0 ? (
+                <div className="text-center py-12 text-emerald-600">
+                  <Calendar className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                  <p>No meals planned yet. Add recipes from the Recipes or Saved tabs!</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {mealPlan.map(recipe => (
+                    <div key={recipe.plannedId} className="border border-emerald-200 rounded-lg p-4">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <h3 className="text-lg font-bold text-emerald-800">{recipe.name}</h3>
+                          <div className="flex gap-3 mt-1 text-sm text-emerald-600 flex-wrap">
+                            <span>💪 {recipe.protein}</span>
+                            <span>🥑 {recipe.fat}</span>
+                            {recipe.carbs && <span>🌾 {recipe.carbs}</span>}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => setNutritionRecipe(recipe)}
+                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded" title="Nutrition details">
+                            <BarChart2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => removeFromMealPlan(recipe.plannedId)} className="p-2 text-red-600 hover:bg-red-50 rounded">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-3 flex-wrap">
+                        <button onClick={() => addMissingToShoppingList(recipe)}
+                          className="flex-1 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 flex items-center justify-center gap-2 font-medium text-sm">
+                          <ShoppingCart className="w-4 h-4" /> Add Missing to Shopping
+                        </button>
+                        <button onClick={() => markAsCooked(recipe)}
+                          className="flex-1 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 flex items-center justify-center gap-2 font-medium text-sm">
+                          <Utensils className="w-4 h-4" /> Mark as Cooked
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -752,9 +1085,8 @@ function GroceryMealPlanner() {
               <h2 className="text-2xl font-bold text-emerald-800">Shopping List</h2>
               <div className="flex gap-2">
                 <button onClick={addActiveRecurringToShoppingList}
-                  className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 text-sm font-medium flex items-center gap-2"
-                >
-                  <Repeat className="w-4 h-4" /> Add Recurring Items
+                  className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 text-sm font-medium flex items-center gap-2">
+                  <Repeat className="w-4 h-4" /> Add Recurring
                 </button>
                 {shoppingList.some(item => item.purchased) && (
                   <button onClick={clearPurchased} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-medium">
@@ -763,17 +1095,17 @@ function GroceryMealPlanner() {
                 )}
               </div>
             </div>
+            <ManualShoppingItemForm onAdd={addManualShoppingItem} />
             {shoppingList.length === 0 ? (
               <div className="text-center py-12 text-emerald-600">
                 <ShoppingCart className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                <p>Your shopping list is empty. Add items from your meal plan!</p>
+                <p>Your shopping list is empty. Add items above or from your meal plan!</p>
               </div>
             ) : (
               <div className="space-y-2">
                 {shoppingList.map(item => (
                   <div key={item.id} className={`flex items-center gap-3 p-3 rounded-lg ${item.purchased ? 'bg-gray-100' : 'bg-emerald-50'}`}>
-                    <input type="checkbox" checked={item.purchased} onChange={() => togglePurchased(item.id)}
-                      className="w-5 h-5 text-emerald-600 rounded" />
+                    <input type="checkbox" checked={item.purchased} onChange={() => togglePurchased(item.id)} className="w-5 h-5 text-emerald-600 rounded" />
                     <div className="flex-1">
                       <p className={`font-medium ${item.purchased ? 'line-through text-gray-500' : 'text-emerald-800'}`}>
                         {item.item} - {item.amount}
@@ -794,7 +1126,7 @@ function GroceryMealPlanner() {
         {activeTab === 'recurring' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-emerald-800 mb-4">Recurring Shopping Items</h2>
-            <p className="text-emerald-600 mb-2">Items you buy regularly (like milk, eggs, bread). Add them once and easily add to your shopping list each week!</p>
+            <p className="text-emerald-600 mb-6">Items you buy regularly. The auto-scheduler adds them to your shopping list on the correct day each week.</p>
             <RecurringItemForm onAdd={addRecurringItem} />
             {recurringItems.length === 0 ? (
               <div className="text-center py-12 text-emerald-600">
@@ -805,20 +1137,15 @@ function GroceryMealPlanner() {
               <div className="space-y-2">
                 {recurringItems.map(item => (
                   <div key={item.id} className={`flex items-center gap-3 p-3 rounded-lg ${item.active ? 'bg-emerald-50' : 'bg-gray-100'}`}>
-                    <input type="checkbox" checked={item.active} onChange={() => toggleRecurringActive(item.id)}
-                      className="w-5 h-5 text-emerald-600 rounded"
-                      title={item.active ? 'Active' : 'Inactive - skip for now'}
-                    />
+                    <input type="checkbox" checked={item.active} onChange={() => toggleRecurringActive(item.id)} className="w-5 h-5 text-emerald-600 rounded" />
                     <div className="flex-1">
                       <input type="text" value={item.item} onChange={(e) => updateRecurringItem(item.id, 'item', e.target.value)}
-                        className={`font-medium px-2 py-1 bg-white border border-emerald-200 rounded ${!item.active ? 'text-gray-500' : 'text-emerald-800'}`}
-                      />
+                        className={`font-medium px-2 py-1 bg-white border border-emerald-200 rounded ${!item.active ? 'text-gray-500' : 'text-emerald-800'}`} />
                       <div className="flex gap-2 items-center mt-1">
                         <input type="text" value={item.amount} onChange={(e) => updateRecurringItem(item.id, 'amount', e.target.value)}
                           className="text-sm text-emerald-600 px-2 py-1 bg-white border border-emerald-200 rounded w-24" />
                         <select value={item.frequency} onChange={(e) => updateRecurringItem(item.id, 'frequency', e.target.value)}
-                          className="text-sm text-emerald-600 px-2 py-1 bg-white border border-emerald-200 rounded"
-                        >
+                          className="text-sm text-emerald-600 px-2 py-1 bg-white border border-emerald-200 rounded">
                           <option value="weekly">Weekly</option>
                           <option value="biweekly">Bi-weekly</option>
                           <option value="monthly">Monthly</option>
@@ -835,8 +1162,7 @@ function GroceryMealPlanner() {
             {recurringItems.length > 0 && (
               <div className="mt-6 pt-6 border-t border-emerald-200">
                 <button onClick={addActiveRecurringToShoppingList}
-                  className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg hover:from-emerald-700 hover:to-teal-700 font-medium flex items-center justify-center gap-2"
-                >
+                  className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg hover:from-emerald-700 hover:to-teal-700 font-medium flex items-center justify-center gap-2">
                   <ShoppingCart className="w-5 h-5" />
                   Add Active Items to Shopping List ({recurringItems.filter(i => i.active).length})
                 </button>
@@ -858,14 +1184,47 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
   const [servings, setServings] = useState(4);
   const [protein, setProtein] = useState('');
   const [fat, setFat] = useState('');
+  const [carbs, setCarbs] = useState('');
   const [ingredients, setIngredients] = useState([{ item: '', amount: '' }]);
   const [instructions, setInstructions] = useState(['']);
+  const [isEstimating, setIsEstimating] = useState(false);
+
+  const estimateMacros = async () => {
+    const validIngredients = ingredients.filter(i => i.item.trim());
+    if (validIngredients.length === 0) { alert('Add some ingredients first!'); return; }
+    if (!GROQ_API_KEY) { alert('Groq API key not configured'); return; }
+    setIsEstimating(true);
+    try {
+      const ingList = validIngredients.map(i => `${i.amount} ${i.item}`).join(', ');
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{
+            role: "user",
+            content: `Estimate the nutrition per serving (${servings} servings total) for a recipe with these ingredients: ${ingList}\n\nRespond ONLY with JSON (no markdown):\n{\n  "protein": "Xg",\n  "fat": "Xg",\n  "carbs": "Xg",\n  "calories": X,\n  "fiber": "Xg",\n  "sugar": "Xg",\n  "addedSugar": "Xg",\n  "saturatedFat": "Xg",\n  "unsaturatedFat": "Xg",\n  "transFat": "Xg",\n  "sodium": "Xmg",\n  "potassium": "Xmg",\n  "calcium": "Xmg",\n  "iron": "Xmg",\n  "vitaminA": "Xmcg",\n  "vitaminC": "Xmg",\n  "vitaminD": "Xmcg",\n  "vitaminB12": "Xmcg"\n}`
+          }],
+          temperature: 0.3, max_tokens: 500
+        })
+      });
+      const data = await response.json();
+      const text = data.choices[0].message.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const macros = JSON.parse(text);
+      setProtein(macros.protein || '');
+      setFat(macros.fat || '');
+      setCarbs(macros.carbs || '');
+      // Store full nutrition details on the recipe for the nutrition modal
+      window._pendingNutrition = { ...macros, aiGenerated: true };
+    } catch (e) {
+      alert('Error estimating macros. Try again.');
+    } finally { setIsEstimating(false); }
+  };
 
   const addIngredientRow = () => setIngredients([...ingredients, { item: '', amount: '' }]);
   const removeIngredientRow = (idx) => setIngredients(ingredients.filter((_, i) => i !== idx));
   const updateIngredient = (idx, field, value) =>
     setIngredients(ingredients.map((ing, i) => i === idx ? { ...ing, [field]: value } : ing));
-
   const addInstructionRow = () => setInstructions([...instructions, '']);
   const removeInstructionRow = (idx) => setInstructions(instructions.filter((_, i) => i !== idx));
   const updateInstruction = (idx, value) =>
@@ -882,6 +1241,7 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
       servings: parseInt(servings) || 4,
       protein: protein || 'N/A',
       fat: fat || 'N/A',
+      carbs: carbs || 'N/A',
       ingredients: validIngredients.map(ing => ({
         item: ing.item.toLowerCase().trim(),
         amount: ing.amount.trim() || '1',
@@ -892,8 +1252,10 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
       })),
       instructions: instructions.filter(s => s.trim()),
       matchPercentage: 0,
-      source: 'Custom'
+      source: 'Custom',
+      nutritionDetails: window._pendingNutrition || null
     };
+    window._pendingNutrition = null;
     onSave(recipe);
   };
 
@@ -904,9 +1266,7 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
           <h2 className="text-2xl font-bold text-emerald-800 flex items-center gap-2">
             <PlusCircle className="w-6 h-6" /> Create Custom Recipe
           </h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5" />
-          </button>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
@@ -914,32 +1274,45 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
             <div className="col-span-2">
               <label className="block text-sm font-medium text-emerald-700 mb-1">Recipe Name *</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Grilled Lemon Chicken"
-                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              />
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
             </div>
             <div>
               <label className="block text-sm font-medium text-emerald-700 mb-1">Prep Time</label>
               <input type="text" value={prepTime} onChange={(e) => setPrepTime(e.target.value)} placeholder="e.g. 30 min"
-                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              />
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
             </div>
             <div>
               <label className="block text-sm font-medium text-emerald-700 mb-1">Servings</label>
               <input type="number" value={servings} onChange={(e) => setServings(e.target.value)} min={1}
-                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              />
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-emerald-700 mb-1">Protein</label>
-              <input type="text" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="e.g. 35g"
-                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              />
+          </div>
+
+          {/* Macro fields + AI estimate */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-medium text-emerald-700">Macros (per serving)</label>
+              <button onClick={estimateMacros} disabled={isEstimating}
+                className="text-sm bg-purple-100 text-purple-700 px-3 py-1 rounded-lg hover:bg-purple-200 flex items-center gap-1 disabled:opacity-50">
+                <Sparkles className="w-3 h-3" /> {isEstimating ? 'Estimating...' : 'AI Estimate'}
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-emerald-700 mb-1">Fat</label>
-              <input type="text" value={fat} onChange={(e) => setFat(e.target.value)} placeholder="e.g. 10g"
-                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              />
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-emerald-600 mb-1 block">Protein</label>
+                <input type="text" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="e.g. 35g"
+                  className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+              </div>
+              <div>
+                <label className="text-xs text-emerald-600 mb-1 block">Fat</label>
+                <input type="text" value={fat} onChange={(e) => setFat(e.target.value)} placeholder="e.g. 10g"
+                  className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+              </div>
+              <div>
+                <label className="text-xs text-emerald-600 mb-1 block">Carbs</label>
+                <input type="text" value={carbs} onChange={(e) => setCarbs(e.target.value)} placeholder="e.g. 30g"
+                  className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+              </div>
             </div>
           </div>
 
@@ -956,12 +1329,10 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
                 <div key={idx} className="flex gap-2 items-center">
                   <input type="text" value={ing.item} onChange={(e) => updateIngredient(idx, 'item', e.target.value)}
                     placeholder="Ingredient name"
-                    className="flex-1 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  />
+                    className="flex-1 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
                   <input type="text" value={ing.amount} onChange={(e) => updateIngredient(idx, 'amount', e.target.value)}
                     placeholder="Amount"
-                    className="w-28 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  />
+                    className="w-28 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
                   <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${
                     pantryItems.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim())
                       ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
@@ -992,8 +1363,7 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
                   <span className="text-sm text-emerald-600 font-medium mt-2 w-5 shrink-0">{idx + 1}.</span>
                   <textarea value={step} onChange={(e) => updateInstruction(idx, e.target.value)}
                     placeholder={`Step ${idx + 1}`} rows={2}
-                    className="flex-1 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
-                  />
+                    className="flex-1 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none" />
                   {instructions.length > 1 && (
                     <button onClick={() => removeInstructionRow(idx)} className="p-1 text-red-500 hover:bg-red-50 rounded mt-1">
                       <X className="w-4 h-4" />
@@ -1006,14 +1376,44 @@ function CreateRecipeModal({ pantryItems, onSave, onClose }) {
         </div>
 
         <div className="p-6 border-t border-emerald-100 flex gap-3">
-          <button onClick={onClose} className="flex-1 py-3 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 font-medium">
-            Cancel
-          </button>
+          <button onClick={onClose} className="flex-1 py-3 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 font-medium">Cancel</button>
           <button onClick={handleSave} className="flex-1 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium flex items-center justify-center gap-2">
             <Check className="w-4 h-4" /> Save Recipe
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Manual Shopping Item Form ───────────────────────────────────────────────
+
+function ManualShoppingItemForm({ onAdd }) {
+  const [name, setName] = React.useState('');
+  const [amount, setAmount] = React.useState('');
+
+  const handleSubmit = () => {
+    if (!name.trim()) return;
+    onAdd(name, amount);
+    setName(''); setAmount('');
+  };
+
+  return (
+    <div className="flex gap-3 mb-6 flex-wrap">
+      <input type="text" placeholder="Item name (e.g., bananas)" value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+        className="flex-1 min-w-[180px] px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+      />
+      <input type="text" placeholder="Amount (e.g., 2 lbs)" value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+        className="w-36 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+      />
+      <button onClick={handleSubmit}
+        className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
+        <Plus className="w-4 h-4" /> Add
+      </button>
     </div>
   );
 }
@@ -1037,22 +1437,17 @@ function RecurringItemForm({ onAdd }) {
       <div className="flex gap-3 flex-wrap">
         <input type="text" placeholder="Item name (e.g., milk, eggs)" value={item}
           onChange={(e) => setItem(e.target.value)}
-          className="flex-1 min-w-[200px] px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-        />
+          className="flex-1 min-w-[200px] px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
         <input type="text" placeholder="Amount (e.g., 1 gallon)" value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="w-40 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-        />
+          className="w-40 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
         <select value={frequency} onChange={(e) => setFrequency(e.target.value)}
-          className="px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-        >
+          className="px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent">
           <option value="weekly">Weekly</option>
           <option value="biweekly">Bi-weekly</option>
           <option value="monthly">Monthly</option>
         </select>
-        <button onClick={handleSubmit}
-          className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium"
-        >
+        <button onClick={handleSubmit} className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
           <Plus className="w-4 h-4" /> Add
         </button>
       </div>
@@ -1062,7 +1457,7 @@ function RecurringItemForm({ onAdd }) {
 
 // ─── Recipe Card ─────────────────────────────────────────────────────────────
 
-function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, onUpdate, pantryItems, isSaved, isEditable }) {
+function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, onUpdate, onShare, onNutrition, pantryItems, isSaved, isEditable, alreadySaved }) {
   const [expanded, setExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(recipe.name);
@@ -1070,31 +1465,24 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
   const [editServings, setEditServings] = useState(recipe.servings);
   const [editProtein, setEditProtein] = useState(recipe.protein);
   const [editFat, setEditFat] = useState(recipe.fat);
+  const [editCarbs, setEditCarbs] = useState(recipe.carbs || '');
   const [editIngredients, setEditIngredients] = useState(recipe.ingredients);
   const [editInstructions, setEditInstructions] = useState(recipe.instructions);
 
   const missingCount = recipe.ingredients.filter(i => !i.inPantry).length;
 
   const startEdit = () => {
-    setEditName(recipe.name);
-    setEditPrepTime(recipe.prepTime);
-    setEditServings(recipe.servings);
-    setEditProtein(recipe.protein);
-    setEditFat(recipe.fat);
-    setEditIngredients([...recipe.ingredients]);
-    setEditInstructions([...recipe.instructions]);
-    setExpanded(true);
-    setIsEditing(true);
+    setEditName(recipe.name); setEditPrepTime(recipe.prepTime);
+    setEditServings(recipe.servings); setEditProtein(recipe.protein);
+    setEditFat(recipe.fat); setEditCarbs(recipe.carbs || '');
+    setEditIngredients([...recipe.ingredients]); setEditInstructions([...recipe.instructions]);
+    setExpanded(true); setIsEditing(true);
   };
 
   const saveEdit = () => {
     onUpdate({
-      ...recipe,
-      name: editName,
-      prepTime: editPrepTime,
-      servings: editServings,
-      protein: editProtein,
-      fat: editFat,
+      ...recipe, name: editName, prepTime: editPrepTime, servings: editServings,
+      protein: editProtein, fat: editFat, carbs: editCarbs,
       ingredients: editIngredients.filter(i => i.item.trim()),
       instructions: editInstructions.filter(s => s.trim()),
     });
@@ -1146,25 +1534,26 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
               <input type="text" value={editFat} onChange={(e) => setEditFat(e.target.value)}
                 className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
             </div>
+            <div>
+              <label className="text-xs font-medium text-emerald-700 mb-1 block">Carbs</label>
+              <input type="text" value={editCarbs} onChange={(e) => setEditCarbs(e.target.value)}
+                className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+            </div>
           </div>
 
           <div>
             <div className="flex justify-between items-center mb-2">
               <label className="text-xs font-medium text-emerald-700">Ingredients</label>
               <button onClick={() => setEditIngredients([...editIngredients, { item: '', amount: '', inPantry: false }])}
-                className="text-xs text-emerald-600 hover:underline flex items-center gap-1">
-                <Plus className="w-3 h-3" /> Add
-              </button>
+                className="text-xs text-emerald-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
             </div>
             <div className="space-y-2">
               {editIngredients.map((ing, idx) => (
                 <div key={idx} className="flex gap-2 items-center">
                   <input type="text" value={ing.item} onChange={(e) => updateEditIngredient(idx, 'item', e.target.value)}
-                    placeholder="Ingredient"
-                    className="flex-1 px-3 py-1 border border-emerald-200 rounded text-sm" />
+                    placeholder="Ingredient" className="flex-1 px-3 py-1 border border-emerald-200 rounded text-sm" />
                   <input type="text" value={ing.amount} onChange={(e) => updateEditIngredient(idx, 'amount', e.target.value)}
-                    placeholder="Amount"
-                    className="w-24 px-3 py-1 border border-emerald-200 rounded text-sm" />
+                    placeholder="Amount" className="w-24 px-3 py-1 border border-emerald-200 rounded text-sm" />
                   <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${
                     pantryItems?.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim())
                       ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
@@ -1172,9 +1561,7 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
                     {pantryItems?.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim()) ? '✓' : '○'}
                   </span>
                   <button onClick={() => setEditIngredients(editIngredients.filter((_, i) => i !== idx))}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded">
-                    <X className="w-3 h-3" />
-                  </button>
+                    className="p-1 text-red-500 hover:bg-red-50 rounded"><X className="w-3 h-3" /></button>
                 </div>
               ))}
             </div>
@@ -1184,9 +1571,7 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
             <div className="flex justify-between items-center mb-2">
               <label className="text-xs font-medium text-emerald-700">Instructions</label>
               <button onClick={() => setEditInstructions([...editInstructions, ''])}
-                className="text-xs text-emerald-600 hover:underline flex items-center gap-1">
-                <Plus className="w-3 h-3" /> Add step
-              </button>
+                className="text-xs text-emerald-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add step</button>
             </div>
             <div className="space-y-2">
               {editInstructions.map((step, idx) => (
@@ -1196,9 +1581,7 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
                     rows={2} placeholder={`Step ${idx + 1}`}
                     className="flex-1 px-3 py-2 border border-emerald-200 rounded text-sm resize-none" />
                   <button onClick={() => setEditInstructions(editInstructions.filter((_, i) => i !== idx))}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded mt-1">
-                    <X className="w-3 h-3" />
-                  </button>
+                    className="p-1 text-red-500 hover:bg-red-50 rounded mt-1"><X className="w-3 h-3" /></button>
                 </div>
               ))}
             </div>
@@ -1213,17 +1596,17 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
     <div className="bg-white border border-emerald-200 rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-xl font-bold text-emerald-800">{recipe.name}</h3>
-            {recipe.source === 'Custom' && (
-              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Custom</span>
-            )}
+            {recipe.source === 'Custom' && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Custom</span>}
+            {recipe._fromSaved && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">★ Saved</span>}
           </div>
           <div className="flex gap-4 mt-2 text-sm text-emerald-600 flex-wrap">
             <span>⏱️ {recipe.prepTime}</span>
             <span>🍽️ {recipe.servings} servings</span>
             <span>💪 {recipe.protein} protein</span>
             <span>🥑 {recipe.fat} fat</span>
+            {recipe.carbs && recipe.carbs !== 'N/A' && <span>🌾 {recipe.carbs} carbs</span>}
             {recipe.category && <span>🏷️ {recipe.category}</span>}
             {recipe.area && <span>🌍 {recipe.area}</span>}
           </div>
@@ -1270,7 +1653,7 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
       )}
 
       <div className="flex gap-2 flex-wrap">
-        {!isSaved && onSave && (
+        {!isSaved && !alreadySaved && onSave && (
           <button onClick={onSave} className="px-4 py-2 bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 flex items-center gap-2 text-sm font-medium">
             <Heart className="w-4 h-4" /> Save
           </button>
@@ -1281,10 +1664,16 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, on
           </button>
         )}
         <button onClick={onAddToPlan} className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-2 text-sm font-medium">
-          <Calendar className="w-4 h-4" /> Add to Meal Plan
+          <Calendar className="w-4 h-4" /> Meal Plan
         </button>
         <button onClick={onAddToShopping} className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 flex items-center gap-2 text-sm font-medium">
-          <ShoppingCart className="w-4 h-4" /> Shopping List
+          <ShoppingCart className="w-4 h-4" /> Shopping
+        </button>
+        <button onClick={onNutrition} className="px-4 py-2 bg-teal-100 text-teal-700 rounded-lg hover:bg-teal-200 flex items-center gap-2 text-sm font-medium">
+          <BarChart2 className="w-4 h-4" /> Nutrition
+        </button>
+        <button onClick={onShare} className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 flex items-center gap-2 text-sm font-medium">
+          <Share2 className="w-4 h-4" /> Share
         </button>
         {isSaved && onDelete && (
           <button onClick={onDelete} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center gap-2 text-sm font-medium ml-auto">
