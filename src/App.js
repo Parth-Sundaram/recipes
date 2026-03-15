@@ -491,7 +491,7 @@ function GroceryMealPlanner() {
                 Smart Grocery & Meal Planner
               </h1>
               <p className="text-emerald-600 mt-2">
-                AI-powered meal planning with cloud sync
+              Meal planning with cloud sync
                 {user && <span className="ml-2">• {user.email}</span>}
               </p>
             </div>
