@@ -31,11 +31,11 @@ function GroceryMealPlanner() {
   
   const loadAllData = useCallback(async (client, userId) => {
     try {
-      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', userId);
-      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', userId);
-      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', userId);
-      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', userId);
-      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', userId);
+      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', user.id);
+      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', user.id);
+      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', user.id);
+      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', user.id);
+      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', user.id);
       
       if (pantry) setPantryItems(pantry);
       if (saved) setSavedRecipes(saved.map(r => JSON.parse(r.recipe_data)));
@@ -201,7 +201,7 @@ function GroceryMealPlanner() {
   };
   
   const removePantryItem = async (id) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const { error } = await supabase.from('pantry').delete().eq('id', id);
     
@@ -211,7 +211,7 @@ function GroceryMealPlanner() {
   };
   
   const updatePantryItem = async (id, field, value) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const updates = { [field]: value };
     const { error } = await supabase.from('pantry').update(updates).eq('id', id);
@@ -412,7 +412,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   
   // Save recipe
   const saveRecipe = async (recipe) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     if (savedRecipes.find(r => r.name === recipe.name)) {
       alert('Recipe already saved!');
@@ -431,12 +431,12 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const removeSavedRecipe = async (recipeName) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const { error } = await supabase
       .from('saved_recipes')
       .delete()
-      .eq('user_id', userId)
+      .eq('user_id', user.id)
       .eq('recipe_data', JSON.stringify(savedRecipes.find(r => r.name === recipeName)));
     
     if (!error) {
@@ -446,7 +446,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   
   // Meal planning
   const addToMealPlan = async (recipe) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const recipeWithId = { ...recipe, plannedId: Date.now() + Math.random() };
     
@@ -463,14 +463,14 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const removeFromMealPlan = async (plannedId) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const recipe = mealPlan.find(r => r.plannedId === plannedId);
     
     const { error } = await supabase
       .from('meal_plan')
       .delete()
-      .eq('user_id', userId)
+      .eq('user_id', user.id)
       .eq('recipe_data', JSON.stringify(recipe));
     
     if (!error) {
@@ -479,7 +479,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const addMissingToShoppingList = async (recipe) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const missingIngredients = recipe.ingredients.filter(ing => !ing.inPantry);
     
@@ -512,7 +512,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const togglePurchased = async (id) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const item = shoppingList.find(i => i.id === id);
     const { error } = await supabase
@@ -528,7 +528,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const removeFromShopping = async (id) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const { error } = await supabase.from('shopping_list').delete().eq('id', id);
     
@@ -538,7 +538,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const clearPurchased = async () => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const purchasedIds = shoppingList.filter(i => i.purchased).map(i => i.id);
     
@@ -573,7 +573,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const removeRecurringItem = async (id) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const { error } = await supabase.from('recurring_items').delete().eq('id', id);
     
@@ -583,7 +583,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const toggleRecurringActive = async (id) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const item = recurringItems.find(i => i.id === id);
     const { error } = await supabase
@@ -599,7 +599,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const updateRecurringItem = async (id, field, value) => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const updates = { [field]: value };
     const { error } = await supabase.from('recurring_items').update(updates).eq('id', id);
@@ -612,7 +612,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
   };
   
   const addActiveRecurringToShoppingList = async () => {
-    if (!supabase) return;
+    if (!supabase || !user) return;
     
     const activeItems = recurringItems.filter(i => i.active);
     
