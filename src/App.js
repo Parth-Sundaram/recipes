@@ -1,13 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, Repeat } from 'lucide-react';
+import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, X, Repeat, Edit2, Check, PlusCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_KEY;
-const GROQ_API_KEY = process.env.REACT_APP_GROQ_API_KEY;
-const SPOONACULAR_API_KEY = process.env.REACT_APP_SPOONACULAR_API_KEY;
+const GROQ_API_KEY = process.env.REACT_APP_GROQ_KEY;
+const SPOONACULAR_API_KEY = process.env.REACT_APP_SPOONACULAR_KEY;
 const EDAMAM_APP_ID = process.env.REACT_APP_EDAMAM_APP_ID;
 const EDAMAM_APP_KEY = process.env.REACT_APP_EDAMAM_APP_KEY;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function recalcPantryMatch(recipe, pantryItems) {
+  const ingredients = recipe.ingredients.map(ing => ({
+    ...ing,
+    inPantry: pantryItems.some(p =>
+      p.name.toLowerCase().includes(ing.item.toLowerCase()) ||
+      ing.item.toLowerCase().includes(p.name.toLowerCase())
+    )
+  }));
+  const matchPercentage = ingredients.length > 0
+    ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100)
+    : 0;
+  return { ...recipe, ingredients, matchPercentage };
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 function GroceryMealPlanner() {
   const [activeTab, setActiveTab] = useState('pantry');
@@ -26,6 +44,7 @@ function GroceryMealPlanner() {
   const [authPassword, setAuthPassword] = useState('');
   const [supabase, setSupabase] = useState(null);
   const [newItem, setNewItem] = useState({ name: '', quantity: '', unit: 'units' });
+  const [showCreateRecipe, setShowCreateRecipe] = useState(false);
 
   const loadAllData = useCallback(async (client, userId) => {
     try {
@@ -95,7 +114,8 @@ function GroceryMealPlanner() {
     initializeSupabase(SUPABASE_URL, SUPABASE_ANON_KEY);
   }, [initializeSupabase]);
 
-  // Auth Functions
+  // ── Auth ──────────────────────────────────────────────────────────────────
+
   const handleSignup = async () => {
     if (!authEmail || !authPassword) { alert('Please enter email and password'); return; }
     if (authPassword.length < 6) { alert('Password must be at least 6 characters'); return; }
@@ -105,9 +125,8 @@ function GroceryMealPlanner() {
       if (error) throw error;
       alert('Account created! Please check your email to verify your account.');
       setAuthEmail(''); setAuthPassword(''); setAuthMode('login');
-    } catch (error) {
-      alert('Error signing up: ' + error.message);
-    } finally { setIsLoading(false); }
+    } catch (error) { alert('Error signing up: ' + error.message); }
+    finally { setIsLoading(false); }
   };
 
   const handleLogin = async () => {
@@ -117,9 +136,8 @@ function GroceryMealPlanner() {
       const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
       if (error) throw error;
       setAuthEmail(''); setAuthPassword('');
-    } catch (error) {
-      alert('Error logging in: ' + error.message);
-    } finally { setIsLoading(false); }
+    } catch (error) { alert('Error logging in: ' + error.message); }
+    finally { setIsLoading(false); }
   };
 
   const handleLogout = async () => {
@@ -127,12 +145,11 @@ function GroceryMealPlanner() {
       await supabase.auth.signOut();
       setPantryItems([]); setRecipes([]); setSavedRecipes([]);
       setMealPlan([]); setShoppingList([]); setRecurringItems([]);
-    } catch (error) {
-      alert('Error logging out: ' + error.message);
-    }
+    } catch (error) { alert('Error logging out: ' + error.message); }
   };
 
-  // Pantry Management
+  // ── Pantry ────────────────────────────────────────────────────────────────
+
   const addPantryItem = async () => {
     if (!newItem.name || !newItem.quantity || !supabase || !user) return;
     const item = {
@@ -158,7 +175,8 @@ function GroceryMealPlanner() {
     if (!error) setPantryItems(pantryItems.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
-  // Recipe Suggestions with Groq AI
+  // ── Recipe Suggestions (Groq AI) ──────────────────────────────────────────
+
   const getRecipeSuggestions = async () => {
     if (pantryItems.length === 0) { alert('Please add some pantry items first!'); return; }
     if (!GROQ_API_KEY) { alert('Please configure your Groq API key'); return; }
@@ -188,7 +206,8 @@ function GroceryMealPlanner() {
     } finally { setIsLoading(false); }
   };
 
-  // Multi-Source Recipe Search
+  // ── Multi-Source Recipe Search ────────────────────────────────────────────
+
   const searchRecipesFromDB = async () => {
     if (!searchQuery.trim()) return;
     setIsLoading(true);
@@ -300,7 +319,6 @@ function GroceryMealPlanner() {
         allRecipes = JSON.parse(recipeText).map(r => ({ ...r, id: Date.now() + Math.random(), source: 'AI Generated' }));
       }
 
-      // Deduplicate and sort
       const unique = allRecipes.reduce((acc, recipe) => {
         if (!acc.find(r => r.name.toLowerCase() === recipe.name.toLowerCase())) acc.push(recipe);
         return acc;
@@ -313,25 +331,62 @@ function GroceryMealPlanner() {
     } finally { setIsLoading(false); }
   };
 
-  // Save / unsave recipe
+  // ── Save / Update / Delete Saved Recipes ─────────────────────────────────
+
   const saveRecipe = async (recipe) => {
     if (!supabase || !user) return;
     if (savedRecipes.find(r => r.name === recipe.name)) { alert('Recipe already saved!'); return; }
-    const { data, error } = await supabase.from('saved_recipes').insert([{ user_id: user.id, recipe_data: JSON.stringify(recipe), created_at: new Date().toISOString() }]).select();
-    if (!error && data) setSavedRecipes([...savedRecipes, recipe]);
+    const withMatch = recalcPantryMatch(recipe, pantryItems);
+    const { data, error } = await supabase.from('saved_recipes').insert([{
+      user_id: user.id, recipe_data: JSON.stringify(withMatch), created_at: new Date().toISOString()
+    }]).select();
+    if (!error && data) setSavedRecipes([...savedRecipes, withMatch]);
   };
 
-  const removeSavedRecipe = async (recipeName) => {
+  const updateSavedRecipe = async (updatedRecipe) => {
     if (!supabase || !user) return;
-    const { error } = await supabase.from('saved_recipes').delete().eq('user_id', user.id).eq('recipe_data', JSON.stringify(savedRecipes.find(r => r.name === recipeName)));
-    if (!error) setSavedRecipes(savedRecipes.filter(r => r.name !== recipeName));
+    const withMatch = recalcPantryMatch(updatedRecipe, pantryItems);
+    const original = savedRecipes.find(r => r.id === updatedRecipe.id);
+    const { error } = await supabase
+      .from('saved_recipes')
+      .update({ recipe_data: JSON.stringify(withMatch) })
+      .eq('user_id', user.id)
+      .eq('recipe_data', JSON.stringify(original));
+    if (!error) setSavedRecipes(savedRecipes.map(r => r.id === updatedRecipe.id ? withMatch : r));
   };
 
-  // Meal planning
+  const removeSavedRecipe = async (recipeId) => {
+    if (!supabase || !user) return;
+    const recipe = savedRecipes.find(r => r.id === recipeId);
+    const { error } = await supabase
+      .from('saved_recipes')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('recipe_data', JSON.stringify(recipe));
+    if (!error) setSavedRecipes(savedRecipes.filter(r => r.id !== recipeId));
+  };
+
+  const saveCustomRecipe = async (recipe) => {
+    if (!supabase || !user) return;
+    const withMatch = recalcPantryMatch(recipe, pantryItems);
+    const { data, error } = await supabase.from('saved_recipes').insert([{
+      user_id: user.id, recipe_data: JSON.stringify(withMatch), created_at: new Date().toISOString()
+    }]).select();
+    if (!error && data) {
+      setSavedRecipes([...savedRecipes, withMatch]);
+      setShowCreateRecipe(false);
+      setActiveTab('saved');
+    }
+  };
+
+  // ── Meal Plan ─────────────────────────────────────────────────────────────
+
   const addToMealPlan = async (recipe) => {
     if (!supabase || !user) return;
     const recipeWithId = { ...recipe, plannedId: Date.now() + Math.random() };
-    const { data, error } = await supabase.from('meal_plan').insert([{ user_id: user.id, recipe_data: JSON.stringify(recipeWithId), created_at: new Date().toISOString() }]).select();
+    const { data, error } = await supabase.from('meal_plan').insert([{
+      user_id: user.id, recipe_data: JSON.stringify(recipeWithId), created_at: new Date().toISOString()
+    }]).select();
     if (!error && data) { setMealPlan([...mealPlan, recipeWithId]); setActiveTab('mealPlan'); }
   };
 
@@ -347,10 +402,15 @@ function GroceryMealPlanner() {
     const missingIngredients = recipe.ingredients.filter(ing => !ing.inPantry);
     if (missingIngredients.length === 0) { alert('You have all ingredients for this recipe!'); return; }
     if (!window.confirm(`Add ${missingIngredients.length} missing ingredients to shopping list?`)) return;
-    const newItems = missingIngredients.map(ing => ({ user_id: user.id, item: ing.item, amount: ing.amount, recipe: recipe.name, purchased: false, created_at: new Date().toISOString() }));
+    const newItems = missingIngredients.map(ing => ({
+      user_id: user.id, item: ing.item, amount: ing.amount,
+      recipe: recipe.name, purchased: false, created_at: new Date().toISOString()
+    }));
     const { data, error } = await supabase.from('shopping_list').insert(newItems).select();
     if (!error && data) { setShoppingList([...shoppingList, ...data]); setActiveTab('shopping'); }
   };
+
+  // ── Shopping List ─────────────────────────────────────────────────────────
 
   const togglePurchased = async (id) => {
     if (!supabase || !user) return;
@@ -372,10 +432,14 @@ function GroceryMealPlanner() {
     if (!error) setShoppingList(shoppingList.filter(item => !item.purchased));
   };
 
-  // Recurring Items
+  // ── Recurring Items ───────────────────────────────────────────────────────
+
   const addRecurringItem = async (item, amount, frequency = 'weekly') => {
     if (!supabase || !item || !amount) return;
-    const newRecurring = { user_id: user.id, item: item.toLowerCase().trim(), amount, frequency, active: true, created_at: new Date().toISOString() };
+    const newRecurring = {
+      user_id: user.id, item: item.toLowerCase().trim(),
+      amount, frequency, active: true, created_at: new Date().toISOString()
+    };
     const { data, error } = await supabase.from('recurring_items').insert([newRecurring]).select();
     if (!error && data) setRecurringItems([...recurringItems, data[0]]);
   };
@@ -404,10 +468,15 @@ function GroceryMealPlanner() {
     const activeItems = recurringItems.filter(i => i.active);
     if (activeItems.length === 0) { alert('No active recurring items to add!'); return; }
     if (!window.confirm(`Add ${activeItems.length} recurring items to shopping list?`)) return;
-    const newItems = activeItems.map(item => ({ user_id: user.id, item: item.item, amount: item.amount, recipe: `Recurring (${item.frequency})`, purchased: false, created_at: new Date().toISOString() }));
+    const newItems = activeItems.map(item => ({
+      user_id: user.id, item: item.item, amount: item.amount,
+      recipe: `Recurring (${item.frequency})`, purchased: false, created_at: new Date().toISOString()
+    }));
     const { data, error } = await supabase.from('shopping_list').insert(newItems).select();
     if (!error && data) { setShoppingList([...shoppingList, ...data]); alert(`Added ${activeItems.length} recurring items to shopping list!`); }
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50">
@@ -450,8 +519,7 @@ function GroceryMealPlanner() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-emerald-700 mb-2">Email</label>
-                  <input
-                    type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)}
+                  <input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && (authMode === 'login' ? handleLogin() : handleSignup())}
                     placeholder="you@example.com"
                     className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
@@ -459,16 +527,13 @@ function GroceryMealPlanner() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-emerald-700 mb-2">Password</label>
-                  <input
-                    type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}
+                  <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && (authMode === 'login' ? handleLogin() : handleSignup())}
                     placeholder={authMode === 'signup' ? 'Minimum 6 characters' : 'Your password'}
                     className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                   />
                 </div>
-                <button
-                  onClick={authMode === 'login' ? handleLogin : handleSignup}
-                  disabled={isLoading}
+                <button onClick={authMode === 'login' ? handleLogin : handleSignup} disabled={isLoading}
                   className="w-full py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:opacity-50"
                 >
                   {isLoading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Sign Up')}
@@ -483,6 +548,15 @@ function GroceryMealPlanner() {
           </div>
         )}
 
+        {/* Create Recipe Modal */}
+        {showCreateRecipe && (
+          <CreateRecipeModal
+            pantryItems={pantryItems}
+            onSave={saveCustomRecipe}
+            onClose={() => setShowCreateRecipe(false)}
+          />
+        )}
+
         {/* Navigation Tabs */}
         <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
           {[
@@ -493,8 +567,7 @@ function GroceryMealPlanner() {
             { id: 'shopping', label: 'Shopping List', icon: ShoppingCart },
             { id: 'recurring', label: 'Recurring Items', icon: Repeat }
           ].map(tab => (
-            <button
-              key={tab.id} onClick={() => setActiveTab(tab.id)}
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.id ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-emerald-700 hover:bg-emerald-50'
               }`}
@@ -505,13 +578,14 @@ function GroceryMealPlanner() {
           ))}
         </div>
 
-        {/* Pantry Tab */}
+        {/* ── Pantry Tab ── */}
         {activeTab === 'pantry' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-emerald-800 mb-4">Your Pantry</h2>
             <div className="flex gap-3 mb-6 flex-wrap">
               <input type="text" placeholder="Item name" value={newItem.name}
                 onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                onKeyPress={(e) => e.key === 'Enter' && addPantryItem()}
                 className="flex-1 min-w-[200px] px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               />
               <input type="number" placeholder="Quantity" value={newItem.quantity}
@@ -562,13 +636,13 @@ function GroceryMealPlanner() {
           </div>
         )}
 
-        {/* Recipes Tab */}
+        {/* ── Recipes Tab ── */}
         {activeTab === 'recipes' && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="text-2xl font-bold text-emerald-800 mb-4">Search Recipe Database</h2>
               <div className="flex gap-3">
-                <input type="text" placeholder="Search recipes (e.g., 'chicken', 'pasta', 'vegetarian')"
+                <input type="text" placeholder="Search recipes (e.g., 'chicken tikka masala', 'pasta')"
                   value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && searchRecipesFromDB()}
                   className="flex-1 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
@@ -579,7 +653,7 @@ function GroceryMealPlanner() {
                   <Search className="w-4 h-4" /> Search
                 </button>
               </div>
-              <p className="text-xs text-emerald-600 mt-2">Powered by TheMealDB + AI fallback</p>
+              <p className="text-xs text-emerald-600 mt-2">Powered by Spoonacular · Edamam · TheMealDB · AI fallback</p>
             </div>
             {isLoading && (
               <div className="text-center py-12 bg-white rounded-2xl shadow-lg">
@@ -605,14 +679,21 @@ function GroceryMealPlanner() {
           </div>
         )}
 
-        {/* Saved Recipes Tab */}
+        {/* ── Saved Recipes Tab ── */}
         {activeTab === 'saved' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold text-emerald-800 mb-4">Saved Recipes</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-bold text-emerald-800">Saved Recipes</h2>
+              <button onClick={() => setShowCreateRecipe(true)}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium"
+              >
+                <PlusCircle className="w-4 h-4" /> Create Recipe
+              </button>
+            </div>
             {savedRecipes.length === 0 ? (
               <div className="text-center py-12 text-emerald-600">
                 <Heart className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                <p>No saved recipes yet. Save some from the Recipes tab!</p>
+                <p>No saved recipes yet. Save some from the Recipes tab or create your own!</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -620,8 +701,11 @@ function GroceryMealPlanner() {
                   <RecipeCard key={recipe.id} recipe={recipe}
                     onAddToPlan={() => addToMealPlan(recipe)}
                     onAddToShopping={() => addMissingToShoppingList(recipe)}
-                    onDelete={() => removeSavedRecipe(recipe.name)}
+                    onDelete={() => removeSavedRecipe(recipe.id)}
+                    onUpdate={updateSavedRecipe}
+                    pantryItems={pantryItems}
                     isSaved
+                    isEditable
                   />
                 ))}
               </div>
@@ -629,7 +713,7 @@ function GroceryMealPlanner() {
           </div>
         )}
 
-        {/* Meal Plan Tab */}
+        {/* ── Meal Plan Tab ── */}
         {activeTab === 'mealPlan' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-emerald-800 mb-4">Weekly Meal Plan</h2>
@@ -661,7 +745,7 @@ function GroceryMealPlanner() {
           </div>
         )}
 
-        {/* Shopping List Tab */}
+        {/* ── Shopping List Tab ── */}
         {activeTab === 'shopping' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <div className="flex justify-between items-center mb-4">
@@ -706,11 +790,14 @@ function GroceryMealPlanner() {
           </div>
         )}
 
-        {/* Recurring Items Tab */}
+        {/* ── Recurring Items Tab ── */}
         {activeTab === 'recurring' && (
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-emerald-800 mb-4">Recurring Shopping Items</h2>
-            <p className="text-emerald-600 mb-6">Items you buy regularly (like milk, eggs, bread). Add them once and easily add to your shopping list each week!</p>
+            <p className="text-emerald-600 mb-2">Items you buy regularly (like milk, eggs, bread). Add them once and easily add to your shopping list each week!</p>
+            <p className="text-xs text-emerald-500 mb-6">
+              💡 <strong>Auto-schedule tip:</strong> To automate weekly additions, enable the Supabase Edge Function in <code>supabase/functions/recurring-scheduler/index.ts</code> and set a cron trigger in your Supabase dashboard under Edge Functions → Schedule.
+            </p>
             <RecurringItemForm onAdd={addRecurringItem} />
             {recurringItems.length === 0 ? (
               <div className="text-center py-12 text-emerald-600">
@@ -723,7 +810,7 @@ function GroceryMealPlanner() {
                   <div key={item.id} className={`flex items-center gap-3 p-3 rounded-lg ${item.active ? 'bg-emerald-50' : 'bg-gray-100'}`}>
                     <input type="checkbox" checked={item.active} onChange={() => toggleRecurringActive(item.id)}
                       className="w-5 h-5 text-emerald-600 rounded"
-                      title={item.active ? 'Active - will be added to shopping list' : 'Inactive - skip for now'}
+                      title={item.active ? 'Active' : 'Inactive - skip for now'}
                     />
                     <div className="flex-1">
                       <input type="text" value={item.item} onChange={(e) => updateRecurringItem(item.id, 'item', e.target.value)}
@@ -766,7 +853,176 @@ function GroceryMealPlanner() {
   );
 }
 
-// Recurring Item Form Component
+// ─── Create Recipe Modal ─────────────────────────────────────────────────────
+
+function CreateRecipeModal({ pantryItems, onSave, onClose }) {
+  const [name, setName] = useState('');
+  const [prepTime, setPrepTime] = useState('');
+  const [servings, setServings] = useState(4);
+  const [protein, setProtein] = useState('');
+  const [fat, setFat] = useState('');
+  const [ingredients, setIngredients] = useState([{ item: '', amount: '' }]);
+  const [instructions, setInstructions] = useState(['']);
+
+  const addIngredientRow = () => setIngredients([...ingredients, { item: '', amount: '' }]);
+  const removeIngredientRow = (idx) => setIngredients(ingredients.filter((_, i) => i !== idx));
+  const updateIngredient = (idx, field, value) =>
+    setIngredients(ingredients.map((ing, i) => i === idx ? { ...ing, [field]: value } : ing));
+
+  const addInstructionRow = () => setInstructions([...instructions, '']);
+  const removeInstructionRow = (idx) => setInstructions(instructions.filter((_, i) => i !== idx));
+  const updateInstruction = (idx, value) =>
+    setInstructions(instructions.map((s, i) => i === idx ? value : s));
+
+  const handleSave = () => {
+    if (!name.trim()) { alert('Please enter a recipe name'); return; }
+    const validIngredients = ingredients.filter(i => i.item.trim());
+    if (validIngredients.length === 0) { alert('Please add at least one ingredient'); return; }
+    const recipe = {
+      id: Date.now() + Math.random(),
+      name: name.trim(),
+      prepTime: prepTime || '30 min',
+      servings: parseInt(servings) || 4,
+      protein: protein || 'N/A',
+      fat: fat || 'N/A',
+      ingredients: validIngredients.map(ing => ({
+        item: ing.item.toLowerCase().trim(),
+        amount: ing.amount.trim() || '1',
+        inPantry: pantryItems.some(p =>
+          p.name.toLowerCase().includes(ing.item.toLowerCase()) ||
+          ing.item.toLowerCase().includes(p.name.toLowerCase())
+        )
+      })),
+      instructions: instructions.filter(s => s.trim()),
+      matchPercentage: 0,
+      source: 'Custom'
+    };
+    onSave(recipe);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
+        <div className="flex justify-between items-center p-6 border-b border-emerald-100">
+          <h2 className="text-2xl font-bold text-emerald-800 flex items-center gap-2">
+            <PlusCircle className="w-6 h-6" /> Create Custom Recipe
+          </h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-emerald-700 mb-1">Recipe Name *</label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Grilled Lemon Chicken"
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-emerald-700 mb-1">Prep Time</label>
+              <input type="text" value={prepTime} onChange={(e) => setPrepTime(e.target.value)} placeholder="e.g. 30 min"
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-emerald-700 mb-1">Servings</label>
+              <input type="number" value={servings} onChange={(e) => setServings(e.target.value)} min={1}
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-emerald-700 mb-1">Protein</label>
+              <input type="text" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="e.g. 35g"
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-emerald-700 mb-1">Fat</label>
+              <input type="text" value={fat} onChange={(e) => setFat(e.target.value)} placeholder="e.g. 10g"
+                className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          {/* Ingredients */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-medium text-emerald-700">Ingredients *</label>
+              <button onClick={addIngredientRow} className="text-sm text-emerald-600 hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add row
+              </button>
+            </div>
+            <div className="space-y-2">
+              {ingredients.map((ing, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input type="text" value={ing.item} onChange={(e) => updateIngredient(idx, 'item', e.target.value)}
+                    placeholder="Ingredient name"
+                    className="flex-1 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <input type="text" value={ing.amount} onChange={(e) => updateIngredient(idx, 'amount', e.target.value)}
+                    placeholder="Amount"
+                    className="w-28 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${
+                    pantryItems.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim())
+                      ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {pantryItems.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim()) ? '✓ in pantry' : 'not in pantry'}
+                  </span>
+                  {ingredients.length > 1 && (
+                    <button onClick={() => removeIngredientRow(idx)} className="p-1 text-red-500 hover:bg-red-50 rounded">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Instructions */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-medium text-emerald-700">Instructions</label>
+              <button onClick={addInstructionRow} className="text-sm text-emerald-600 hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add step
+              </button>
+            </div>
+            <div className="space-y-2">
+              {instructions.map((step, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <span className="text-sm text-emerald-600 font-medium mt-2 w-5 shrink-0">{idx + 1}.</span>
+                  <textarea value={step} onChange={(e) => updateInstruction(idx, e.target.value)}
+                    placeholder={`Step ${idx + 1}`} rows={2}
+                    className="flex-1 px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+                  />
+                  {instructions.length > 1 && (
+                    <button onClick={() => removeInstructionRow(idx)} className="p-1 text-red-500 hover:bg-red-50 rounded mt-1">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-emerald-100 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 font-medium">
+            Cancel
+          </button>
+          <button onClick={handleSave} className="flex-1 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium flex items-center justify-center gap-2">
+            <Check className="w-4 h-4" /> Save Recipe
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Recurring Item Form ─────────────────────────────────────────────────────
+
 function RecurringItemForm({ onAdd }) {
   const [item, setItem] = useState('');
   const [amount, setAmount] = useState('');
@@ -807,16 +1063,165 @@ function RecurringItemForm({ onAdd }) {
   );
 }
 
-// Recipe Card Component
-function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, isSaved }) {
+// ─── Recipe Card ─────────────────────────────────────────────────────────────
+
+function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, onUpdate, pantryItems, isSaved, isEditable }) {
   const [expanded, setExpanded] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(recipe.name);
+  const [editPrepTime, setEditPrepTime] = useState(recipe.prepTime);
+  const [editServings, setEditServings] = useState(recipe.servings);
+  const [editProtein, setEditProtein] = useState(recipe.protein);
+  const [editFat, setEditFat] = useState(recipe.fat);
+  const [editIngredients, setEditIngredients] = useState(recipe.ingredients);
+  const [editInstructions, setEditInstructions] = useState(recipe.instructions);
+
   const missingCount = recipe.ingredients.filter(i => !i.inPantry).length;
 
+  const startEdit = () => {
+    setEditName(recipe.name);
+    setEditPrepTime(recipe.prepTime);
+    setEditServings(recipe.servings);
+    setEditProtein(recipe.protein);
+    setEditFat(recipe.fat);
+    setEditIngredients([...recipe.ingredients]);
+    setEditInstructions([...recipe.instructions]);
+    setExpanded(true);
+    setIsEditing(true);
+  };
+
+  const saveEdit = () => {
+    onUpdate({
+      ...recipe,
+      name: editName,
+      prepTime: editPrepTime,
+      servings: editServings,
+      protein: editProtein,
+      fat: editFat,
+      ingredients: editIngredients.filter(i => i.item.trim()),
+      instructions: editInstructions.filter(s => s.trim()),
+    });
+    setIsEditing(false);
+  };
+
+  const updateEditIngredient = (idx, field, value) =>
+    setEditIngredients(editIngredients.map((ing, i) => i === idx ? { ...ing, [field]: value } : ing));
+  const updateEditInstruction = (idx, value) =>
+    setEditInstructions(editInstructions.map((s, i) => i === idx ? value : s));
+
+  // ── Edit view ──
+  if (isEditing) {
+    return (
+      <div className="bg-white border-2 border-emerald-400 rounded-lg p-5 shadow-md">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-bold text-emerald-800">Editing Recipe</h3>
+          <div className="flex gap-2">
+            <button onClick={() => setIsEditing(false)} className="px-3 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
+            <button onClick={saveEdit} className="px-3 py-1 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm flex items-center gap-1">
+              <Check className="w-3 h-3" /> Save
+            </button>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-emerald-700 mb-1 block">Name</label>
+              <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-emerald-700 mb-1 block">Prep Time</label>
+              <input type="text" value={editPrepTime} onChange={(e) => setEditPrepTime(e.target.value)}
+                className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-emerald-700 mb-1 block">Servings</label>
+              <input type="number" value={editServings} onChange={(e) => setEditServings(e.target.value)}
+                className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-emerald-700 mb-1 block">Protein</label>
+              <input type="text" value={editProtein} onChange={(e) => setEditProtein(e.target.value)}
+                className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-emerald-700 mb-1 block">Fat</label>
+              <input type="text" value={editFat} onChange={(e) => setEditFat(e.target.value)}
+                className="w-full px-3 py-2 border border-emerald-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-xs font-medium text-emerald-700">Ingredients</label>
+              <button onClick={() => setEditIngredients([...editIngredients, { item: '', amount: '', inPantry: false }])}
+                className="text-xs text-emerald-600 hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add
+              </button>
+            </div>
+            <div className="space-y-2">
+              {editIngredients.map((ing, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input type="text" value={ing.item} onChange={(e) => updateEditIngredient(idx, 'item', e.target.value)}
+                    placeholder="Ingredient"
+                    className="flex-1 px-3 py-1 border border-emerald-200 rounded text-sm" />
+                  <input type="text" value={ing.amount} onChange={(e) => updateEditIngredient(idx, 'amount', e.target.value)}
+                    placeholder="Amount"
+                    className="w-24 px-3 py-1 border border-emerald-200 rounded text-sm" />
+                  <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${
+                    pantryItems?.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim())
+                      ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {pantryItems?.some(p => p.name.toLowerCase().includes(ing.item.toLowerCase()) && ing.item.trim()) ? '✓' : '○'}
+                  </span>
+                  <button onClick={() => setEditIngredients(editIngredients.filter((_, i) => i !== idx))}
+                    className="p-1 text-red-500 hover:bg-red-50 rounded">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-xs font-medium text-emerald-700">Instructions</label>
+              <button onClick={() => setEditInstructions([...editInstructions, ''])}
+                className="text-xs text-emerald-600 hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add step
+              </button>
+            </div>
+            <div className="space-y-2">
+              {editInstructions.map((step, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <span className="text-xs text-emerald-600 font-medium mt-2 w-4 shrink-0">{idx + 1}.</span>
+                  <textarea value={step} onChange={(e) => updateEditInstruction(idx, e.target.value)}
+                    rows={2} placeholder={`Step ${idx + 1}`}
+                    className="flex-1 px-3 py-2 border border-emerald-200 rounded text-sm resize-none" />
+                  <button onClick={() => setEditInstructions(editInstructions.filter((_, i) => i !== idx))}
+                    className="p-1 text-red-500 hover:bg-red-50 rounded mt-1">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Read view ──
   return (
     <div className="bg-white border border-emerald-200 rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <h3 className="text-xl font-bold text-emerald-800">{recipe.name}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-xl font-bold text-emerald-800">{recipe.name}</h3>
+            {recipe.source === 'Custom' && (
+              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Custom</span>
+            )}
+          </div>
           <div className="flex gap-4 mt-2 text-sm text-emerald-600 flex-wrap">
             <span>⏱️ {recipe.prepTime}</span>
             <span>🍽️ {recipe.servings} servings</span>
@@ -831,9 +1236,11 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, is
           <div className="text-xs text-emerald-600">match</div>
         </div>
       </div>
+
       {recipe.thumbnail && (
         <img src={recipe.thumbnail} alt={recipe.name} className="w-full h-48 object-cover rounded-lg mb-3" />
       )}
+
       <div className="mb-3">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-emerald-700">Ingredients</span>
@@ -855,6 +1262,7 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, is
           </button>
         )}
       </div>
+
       {expanded && (
         <div className="mb-3 p-3 bg-emerald-50 rounded-lg">
           <h4 className="font-medium text-emerald-800 mb-2">Instructions</h4>
@@ -863,10 +1271,16 @@ function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, is
           </ol>
         </div>
       )}
+
       <div className="flex gap-2 flex-wrap">
         {!isSaved && onSave && (
           <button onClick={onSave} className="px-4 py-2 bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 flex items-center gap-2 text-sm font-medium">
             <Heart className="w-4 h-4" /> Save
+          </button>
+        )}
+        {isEditable && (
+          <button onClick={startEdit} className="px-4 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 flex items-center gap-2 text-sm font-medium">
+            <Edit2 className="w-4 h-4" /> Edit
           </button>
         )}
         <button onClick={onAddToPlan} className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-2 text-sm font-medium">
