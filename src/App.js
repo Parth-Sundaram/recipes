@@ -318,70 +318,295 @@ The matchPercentage should reflect what % of ingredients I already have. Sort by
     }
   };
   
-  // Search recipes from TheMealDB
+// ULTIMATE Multi-Source Recipe Search
+  // Searches: Spoonacular → Edamam → Recipe Puppy → TheMealDB → Groq AI (fallback)
   const searchRecipesFromDB = async () => {
     if (!searchQuery.trim()) return;
     
     setIsLoading(true);
+    let allRecipes = [];
     
     try {
-      // Search TheMealDB
-      const response = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${searchQuery}`);
-      const data = await response.json();
+      // Get API keys from localStorage
+      const spoonacularKey = localStorage.getItem('spoonacularKey') || '';
+      const edamamAppId = localStorage.getItem('edamamAppId') || '';
+      const edamamAppKey = localStorage.getItem('edamamAppKey') || '';
       
-      if (!data.meals) {
-        alert('No recipes found. Try a different search term.');
-        setIsLoading(false);
-        return;
+      // SOURCE 1: Spoonacular (best for variety and Indian recipes)
+      if (spoonacularKey) {
+        try {
+          console.log('Searching Spoonacular...');
+          const spoonRes = await fetch(
+            `https://api.spoonacular.com/recipes/complexSearch?query=${searchQuery}&number=5&addRecipeInformation=true&fillIngredients=true&apiKey=${spoonacularKey}`
+          );
+          const spoonData = await spoonRes.json();
+          
+          if (spoonData.results && spoonData.results.length > 0) {
+            const spoonRecipes = spoonData.results.map(recipe => {
+              const ingredients = recipe.extendedIngredients?.map(ing => ({
+                item: ing.name.toLowerCase(),
+                amount: `${ing.amount} ${ing.unit}`,
+                inPantry: pantryItems.some(p => 
+                  p.name.toLowerCase().includes(ing.name.toLowerCase()) ||
+                  ing.name.toLowerCase().includes(p.name.toLowerCase())
+                )
+              })) || [];
+              
+              const matchPercentage = ingredients.length > 0 
+                ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100)
+                : 0;
+              
+              return {
+                id: Date.now() + Math.random(),
+                name: recipe.title,
+                prepTime: `${recipe.readyInMinutes || 30} min`,
+                servings: recipe.servings || 4,
+                protein: `${Math.round((recipe.nutrition?.nutrients?.find(n => n.name === 'Protein')?.amount || 25))}g`,
+                fat: `${Math.round((recipe.nutrition?.nutrients?.find(n => n.name === 'Fat')?.amount || 12))}g`,
+                ingredients,
+                instructions: recipe.analyzedInstructions?.[0]?.steps?.map(s => s.step) || ['See full recipe for detailed instructions'],
+                matchPercentage,
+                thumbnail: recipe.image,
+                source: 'Spoonacular'
+              };
+            });
+            allRecipes = [...allRecipes, ...spoonRecipes];
+            console.log(`Found ${spoonRecipes.length} from Spoonacular`);
+          }
+        } catch (error) {
+          console.log('Spoonacular failed:', error.message);
+        }
       }
       
-      // Convert TheMealDB format to our format with AI enhancement
-      const mealDbRecipes = data.meals.slice(0, 3).map(meal => {
-        const ingredients = [];
-        for (let i = 1; i <= 20; i++) {
-          const ingredient = meal[`strIngredient${i}`];
-          const measure = meal[`strMeasure${i}`];
-          if (ingredient && ingredient.trim()) {
-            const inPantry = pantryItems.some(p => 
-              p.name.toLowerCase().includes(ingredient.toLowerCase()) ||
-              ingredient.toLowerCase().includes(p.name.toLowerCase())
-            );
-            ingredients.push({
-              item: ingredient.toLowerCase(),
-              amount: measure || '1',
-              inPantry
+      // SOURCE 2: Edamam (2.3M+ recipes, great coverage)
+      if (edamamAppId && edamamAppKey) {
+        try {
+          console.log('Searching Edamam...');
+          const edamamRes = await fetch(
+            `https://api.edamam.com/api/recipes/v2?type=public&q=${searchQuery}&app_id=${edamamAppId}&app_key=${edamamAppKey}&to=5`
+          );
+          const edamamData = await edamamRes.json();
+          
+          if (edamamData.hits && edamamData.hits.length > 0) {
+            const edamamRecipes = edamamData.hits.map(hit => {
+              const recipe = hit.recipe;
+              const ingredients = recipe.ingredients?.map(ing => ({
+                item: ing.food.toLowerCase(),
+                amount: ing.text,
+                inPantry: pantryItems.some(p => 
+                  p.name.toLowerCase().includes(ing.food.toLowerCase()) ||
+                  ing.food.toLowerCase().includes(p.name.toLowerCase())
+                )
+              })) || [];
+              
+              const matchPercentage = ingredients.length > 0 
+                ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100)
+                : 0;
+              
+              return {
+                id: Date.now() + Math.random(),
+                name: recipe.label,
+                prepTime: `${recipe.totalTime || 30} min`,
+                servings: recipe.yield || 4,
+                protein: `${Math.round(recipe.totalNutrients?.PROCNT?.quantity || 25)}g`,
+                fat: `${Math.round(recipe.totalNutrients?.FAT?.quantity || 12)}g`,
+                ingredients,
+                instructions: ['Visit source for full instructions: ' + recipe.url],
+                matchPercentage,
+                thumbnail: recipe.image,
+                source: 'Edamam',
+                url: recipe.url
+              };
             });
+            allRecipes = [...allRecipes, ...edamamRecipes];
+            console.log(`Found ${edamamRecipes.length} from Edamam`);
           }
+        } catch (error) {
+          console.log('Edamam failed:', error.message);
+        }
+      }
+      
+      // SOURCE 3: Recipe Puppy (1M+ recipes, completely free!)
+      try {
+        console.log('Searching Recipe Puppy...');
+        const puppyRes = await fetch(
+          `http://www.recipepuppy.com/api/?q=${searchQuery}&p=1`
+        );
+        const puppyData = await puppyRes.json();
+        
+        if (puppyData.results && puppyData.results.length > 0) {
+          const puppyRecipes = puppyData.results.slice(0, 5).map(recipe => {
+            const ingredientsList = recipe.ingredients.split(',').map(i => i.trim());
+            const ingredients = ingredientsList.map(ing => ({
+              item: ing.toLowerCase(),
+              amount: '1 serving',
+              inPantry: pantryItems.some(p => 
+                p.name.toLowerCase().includes(ing.toLowerCase()) ||
+                ing.toLowerCase().includes(p.name.toLowerCase())
+              )
+            }));
+            
+            const matchPercentage = ingredients.length > 0 
+              ? Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100)
+              : 0;
+            
+            return {
+              id: Date.now() + Math.random(),
+              name: recipe.title,
+              prepTime: "30 min",
+              servings: 4,
+              protein: "20g",
+              fat: "10g",
+              ingredients,
+              instructions: ['Visit source for full recipe: ' + recipe.href],
+              matchPercentage,
+              thumbnail: recipe.thumbnail,
+              source: 'Recipe Puppy',
+              url: recipe.href
+            };
+          });
+          allRecipes = [...allRecipes, ...puppyRecipes];
+          console.log(`Found ${puppyRecipes.length} from Recipe Puppy`);
+        }
+      } catch (error) {
+        console.log('Recipe Puppy failed:', error.message);
+      }
+      
+      // SOURCE 4: TheMealDB (free, Western-focused but good backup)
+      try {
+        console.log('Searching TheMealDB...');
+        const mealRes = await fetch(
+          `https://www.themealdb.com/api/json/v1/1/search.php?s=${searchQuery}`
+        );
+        const mealData = await mealRes.json();
+        
+        if (mealData.meals && mealData.meals.length > 0) {
+          const mealRecipes = mealData.meals.slice(0, 3).map(meal => {
+            const ingredients = [];
+            for (let i = 1; i <= 20; i++) {
+              const ingredient = meal[`strIngredient${i}`];
+              const measure = meal[`strMeasure${i}`];
+              if (ingredient && ingredient.trim()) {
+                const inPantry = pantryItems.some(p => 
+                  p.name.toLowerCase().includes(ingredient.toLowerCase()) ||
+                  ingredient.toLowerCase().includes(p.name.toLowerCase())
+                );
+                ingredients.push({
+                  item: ingredient.toLowerCase(),
+                  amount: measure || '1',
+                  inPantry
+                });
+              }
+            }
+            
+            const instructions = meal.strInstructions.split('\n').filter(s => s.trim());
+            const matchPercentage = Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100);
+            
+            return {
+              id: Date.now() + Math.random(),
+              name: meal.strMeal,
+              prepTime: "30 min",
+              servings: 4,
+              protein: "25g",
+              fat: "12g",
+              ingredients,
+              instructions,
+              matchPercentage,
+              category: meal.strCategory,
+              area: meal.strArea,
+              thumbnail: meal.strMealThumb,
+              source: 'TheMealDB'
+            };
+          });
+          allRecipes = [...allRecipes, ...mealRecipes];
+          console.log(`Found ${mealRecipes.length} from TheMealDB`);
+        }
+      } catch (error) {
+        console.log('TheMealDB failed:', error.message);
+      }
+      
+      // SOURCE 5: Groq AI (ultimate fallback - always works!)
+      if (allRecipes.length === 0) {
+        if (!groqApiKey) {
+          alert('No recipes found in any database and Groq API key not configured. Please add API keys in settings.');
+          setIsLoading(false);
+          return;
         }
         
-        const instructions = meal.strInstructions.split('\n').filter(s => s.trim());
-        const matchPercentage = Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100);
+        console.log('No recipes found anywhere, generating with AI...');
         
-        return {
+        const pantryList = pantryItems.map(i => i.name).join(', ');
+        
+        const aiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${groqApiKey}`
+          },
+          body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: [{
+              role: "user",
+              content: `Generate 5 recipes for: "${searchQuery}"
+
+My pantry items: ${pantryList || 'none'}
+
+Requirements:
+- High protein, low fat, low preservatives
+- Healthy and clean eating focused
+- Use pantry items where possible
+- If search term suggests a specific cuisine (like Indian, Italian, etc.), generate recipes from that cuisine
+
+Respond ONLY with a JSON array (no markdown, no preamble):
+[
+  {
+    "name": "Recipe Name",
+    "prepTime": "20 min",
+    "servings": 4,
+    "protein": "35g",
+    "fat": "8g",
+    "ingredients": [
+      {"item": "ingredient name", "amount": "quantity", "inPantry": true/false}
+    ],
+    "instructions": ["step 1", "step 2", "step 3"],
+    "matchPercentage": 50
+  }
+]`
+            }],
+            temperature: 0.7,
+            max_tokens: 4000
+          })
+        });
+        
+        const aiData = await aiResponse.json();
+        let recipeText = aiData.choices[0].message.content;
+        recipeText = recipeText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        
+        const aiRecipes = JSON.parse(recipeText);
+        allRecipes = aiRecipes.map(r => ({ 
+          ...r, 
           id: Date.now() + Math.random(),
-          name: meal.strMeal,
-          prepTime: "30 min",
-          servings: 4,
-          protein: "25g",
-          fat: "12g",
-          ingredients,
-          instructions,
-          matchPercentage,
-          category: meal.strCategory,
-          area: meal.strArea,
-          thumbnail: meal.strMealThumb
-        };
-      });
-      
-      // Enhance with Groq AI for nutrition info if API key is available
-      if (groqApiKey) {
-        await enhanceRecipesWithAI(mealDbRecipes);
-      } else {
-        setRecipes(mealDbRecipes);
+          source: 'AI Generated'
+        }));
+        console.log(`Generated ${allRecipes.length} AI recipes`);
       }
+      
+      // Remove duplicates by name (case-insensitive)
+      const uniqueRecipes = allRecipes.reduce((acc, recipe) => {
+        const exists = acc.find(r => r.name.toLowerCase() === recipe.name.toLowerCase());
+        if (!exists) acc.push(recipe);
+        return acc;
+      }, []);
+      
+      // Sort by match percentage (highest first)
+      uniqueRecipes.sort((a, b) => b.matchPercentage - a.matchPercentage);
+      
+      console.log(`Total unique recipes found: ${uniqueRecipes.length}`);
+      setRecipes(uniqueRecipes);
+      
     } catch (error) {
       console.error('Error searching recipes:', error);
-      alert('Error searching recipes. Please try again.');
+      alert('Error searching recipes: ' + error.message);
     } finally {
       setIsLoading(false);
     }
@@ -681,7 +906,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
               {user && (
                 <button
                   onClick={handleLogout}
-                  className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-medium"
+                  className="px-4 py-2 bg-red-1 00 text-red-700 rounded-lg hover:bg-red-200 font-medium"
                 >
                   Logout
                 </button>
@@ -756,6 +981,65 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
                   />
                   <p className="text-xs text-emerald-600 mt-1">
                     Get a free API key from console.groq.com
+                  </p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Spoonacular API Key (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={localStorage.getItem('spoonacularKey') || ''}
+                    onChange={(e) => localStorage.setItem('spoonacularKey', e.target.value)}
+                    placeholder="Optional - Get from spoonacular.com/food-api"
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-emerald-600 mt-1">
+                    5000 free requests/day - Great for Indian recipes!
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Edamam App ID (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={localStorage.getItem('edamamAppId') || ''}
+                    onChange={(e) => localStorage.setItem('edamamAppId', e.target.value)}
+                    placeholder="Optional - Get from developer.edamam.com"
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Edamam App Key (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={localStorage.getItem('edamamAppKey') || ''}
+                    onChange={(e) => localStorage.setItem('edamamAppKey', e.target.value)}
+                    placeholder="Optional - Goes with App ID above"
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-emerald-600 mt-1">
+                    10 requests/day free - 2.3M+ recipes
+                  </p>
+                </div>
+
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <h3 className="font-medium text-blue-800 mb-2">Recipe Sources:</h3>
+                  <ul className="text-sm text-blue-700 space-y-1">
+                    <li>✅ <strong>Recipe Puppy:</strong> Always free, no key needed (1M+ recipes)</li>
+                    <li>✅ <strong>TheMealDB:</strong> Always free, no key needed</li>
+                    <li>🔑 <strong>Spoonacular:</strong> Optional, 5000/day free (best variety!)</li>
+                    <li>🔑 <strong>Edamam:</strong> Optional, 10/day free (2.3M+ recipes)</li>
+                    <li>🤖 <strong>AI Fallback:</strong> Groq generates recipes if nothing found</li>
+                  </ul>
+                  <p className="text-xs text-blue-600 mt-2">
+                    <strong>Tip:</strong> More API keys = more recipes! But Recipe Puppy + TheMealDB + AI work great without any extra keys.
                   </p>
                 </div>
                 
