@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, Settings, X, Repeat } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -25,6 +25,42 @@ function GroceryMealPlanner() {
   // New pantry item form
   const [newItem, setNewItem] = useState({ name: '', quantity: '', unit: 'units' });
   
+  const generateUserId = () => {
+    const id = 'user_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('userId', id);
+    return id;
+  };
+  
+  const loadAllData = useCallback(async (client) => {
+    try {
+      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', userId);
+      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', userId);
+      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', userId);
+      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', userId);
+      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', userId);
+      
+      if (pantry) setPantryItems(pantry);
+      if (saved) setSavedRecipes(saved.map(r => JSON.parse(r.recipe_data)));
+      if (plan) setMealPlan(plan.map(r => JSON.parse(r.recipe_data)));
+      if (shopping) setShoppingList(shopping);
+      if (recurring) setRecurringItems(recurring);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    }
+  }, [userId]);
+  
+  const initializeSupabase = useCallback((url, key) => {
+    try {
+      const client = createClient(url, key);
+      setSupabase(client);
+      setIsConfigured(true);
+      loadAllData(client);
+    } catch (error) {
+      console.error('Error initializing Supabase:', error);
+      alert('Error connecting to Supabase. Please check your credentials.');
+    }
+  }, [loadAllData]);
+  
   // Load settings from localStorage on mount
   useEffect(() => {
     const savedUrl = localStorage.getItem('supabaseUrl');
@@ -41,25 +77,7 @@ function GroceryMealPlanner() {
     } else {
       setShowSettings(true);
     }
-  }, []);
-  
-  const generateUserId = () => {
-    const id = 'user_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('userId', id);
-    return id;
-  };
-  
-  const initializeSupabase = (url, key) => {
-    try {
-      const client = createClient(url, key);
-      setSupabase(client);
-      setIsConfigured(true);
-      loadAllData(client);
-    } catch (error) {
-      console.error('Error initializing Supabase:', error);
-      alert('Error connecting to Supabase. Please check your credentials.');
-    }
-  };
+  }, [initializeSupabase]);
   
   const saveSettings = () => {
     if (!supabaseUrl || !supabaseKey || !groqApiKey) {
@@ -73,25 +91,6 @@ function GroceryMealPlanner() {
     
     initializeSupabase(supabaseUrl, supabaseKey);
     setShowSettings(false);
-  };
-  
-  // Load all data from Supabase
-  const loadAllData = async (client) => {
-    try {
-      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', userId);
-      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', userId);
-      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', userId);
-      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', userId);
-      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', userId);
-      
-      if (pantry) setPantryItems(pantry);
-      if (saved) setSavedRecipes(saved.map(r => JSON.parse(r.recipe_data)));
-      if (plan) setMealPlan(plan.map(r => JSON.parse(r.recipe_data)));
-      if (shopping) setShoppingList(shopping);
-      if (recurring) setRecurringItems(recurring);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    }
   };
   
   // Pantry Management
