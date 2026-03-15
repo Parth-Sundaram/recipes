@@ -31,11 +31,11 @@ function GroceryMealPlanner() {
   
   const loadAllData = useCallback(async (client, userId) => {
     try {
-      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', user.id);
-      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', user.id);
-      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', user.id);
-      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', user.id);
-      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', user.id);
+      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', userId);
+      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', userId);
+      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', userId);
+      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', userId);
+      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', userId);
       
       if (pantry) setPantryItems(pantry);
       if (saved) setSavedRecipes(saved.map(r => JSON.parse(r.recipe_data)));
