@@ -1,0 +1,1236 @@
+import React, { useState, useEffect } from 'react';
+import { Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat, Database, Settings, X, Repeat } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+
+function GroceryMealPlanner() {
+  const [activeTab, setActiveTab] = useState('pantry');
+  const [pantryItems, setPantryItems] = useState([]);
+  const [recipes, setRecipes] = useState([]);
+  const [savedRecipes, setSavedRecipes] = useState([]);
+  const [mealPlan, setMealPlan] = useState([]);
+  const [shoppingList, setShoppingList] = useState([]);
+  const [recurringItems, setRecurringItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [userId, setUserId] = useState('');
+  
+  // Settings state
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseKey, setSupabaseKey] = useState('');
+  const [groqApiKey, setGroqApiKey] = useState('');
+  const [supabase, setSupabase] = useState(null);
+  const [isConfigured, setIsConfigured] = useState(false);
+  
+  // New pantry item form
+  const [newItem, setNewItem] = useState({ name: '', quantity: '', unit: 'units' });
+  
+  // Load settings from localStorage on mount
+  useEffect(() => {
+    const savedUrl = localStorage.getItem('supabaseUrl');
+    const savedKey = localStorage.getItem('supabaseKey');
+    const savedGroqKey = localStorage.getItem('groqApiKey');
+    const savedUserId = localStorage.getItem('userId') || generateUserId();
+    
+    if (savedUrl && savedKey && savedGroqKey) {
+      setSupabaseUrl(savedUrl);
+      setSupabaseKey(savedKey);
+      setGroqApiKey(savedGroqKey);
+      setUserId(savedUserId);
+      initializeSupabase(savedUrl, savedKey);
+    } else {
+      setShowSettings(true);
+    }
+  }, []);
+  
+  const generateUserId = () => {
+    const id = 'user_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('userId', id);
+    return id;
+  };
+  
+  const initializeSupabase = (url, key) => {
+    try {
+      const client = createClient(url, key);
+      setSupabase(client);
+      setIsConfigured(true);
+      loadAllData(client);
+    } catch (error) {
+      console.error('Error initializing Supabase:', error);
+      alert('Error connecting to Supabase. Please check your credentials.');
+    }
+  };
+  
+  const saveSettings = () => {
+    if (!supabaseUrl || !supabaseKey || !groqApiKey) {
+      alert('Please fill in all fields');
+      return;
+    }
+    
+    localStorage.setItem('supabaseUrl', supabaseUrl);
+    localStorage.setItem('supabaseKey', supabaseKey);
+    localStorage.setItem('groqApiKey', groqApiKey);
+    
+    initializeSupabase(supabaseUrl, supabaseKey);
+    setShowSettings(false);
+  };
+  
+  // Load all data from Supabase
+  const loadAllData = async (client) => {
+    try {
+      const { data: pantry } = await client.from('pantry').select('*').eq('user_id', userId);
+      const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', userId);
+      const { data: plan } = await client.from('meal_plan').select('*').eq('user_id', userId);
+      const { data: shopping } = await client.from('shopping_list').select('*').eq('user_id', userId);
+      const { data: recurring } = await client.from('recurring_items').select('*').eq('user_id', userId);
+      
+      if (pantry) setPantryItems(pantry);
+      if (saved) setSavedRecipes(saved.map(r => JSON.parse(r.recipe_data)));
+      if (plan) setMealPlan(plan.map(r => JSON.parse(r.recipe_data)));
+      if (shopping) setShoppingList(shopping);
+      if (recurring) setRecurringItems(recurring);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    }
+  };
+  
+  // Pantry Management
+  const addPantryItem = async () => {
+    if (!newItem.name || !newItem.quantity || !supabase) return;
+    
+    const item = { 
+      user_id: userId,
+      name: newItem.name.toLowerCase().trim(),
+      quantity: parseFloat(newItem.quantity),
+      unit: newItem.unit,
+      created_at: new Date().toISOString()
+    };
+    
+    const { data, error } = await supabase.from('pantry').insert([item]).select();
+    
+    if (!error && data) {
+      setPantryItems([...pantryItems, data[0]]);
+      setNewItem({ name: '', quantity: '', unit: 'units' });
+    }
+  };
+  
+  const removePantryItem = async (id) => {
+    if (!supabase) return;
+    
+    const { error } = await supabase.from('pantry').delete().eq('id', id);
+    
+    if (!error) {
+      setPantryItems(pantryItems.filter(item => item.id !== id));
+    }
+  };
+  
+  const updatePantryItem = async (id, field, value) => {
+    if (!supabase) return;
+    
+    const updates = { [field]: value };
+    const { error } = await supabase.from('pantry').update(updates).eq('id', id);
+    
+    if (!error) {
+      setPantryItems(pantryItems.map(item => 
+        item.id === id ? { ...item, [field]: value } : item
+      ));
+    }
+  };
+  
+  // Recipe Suggestions with Groq AI
+  const getRecipeSuggestions = async () => {
+    if (pantryItems.length === 0) {
+      alert('Please add some pantry items first!');
+      return;
+    }
+    
+    if (!groqApiKey) {
+      alert('Please configure your Groq API key in settings');
+      setShowSettings(true);
+      return;
+    }
+    
+    setIsLoading(true);
+    setActiveTab('recipes');
+    
+    try {
+      const pantryList = pantryItems.map(item => 
+        `${item.name} (${item.quantity} ${item.unit})`
+      ).join(', ');
+      
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${groqApiKey}`
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{
+            role: "user",
+            content: `I have these pantry items: ${pantryList}
+
+Generate 5 recipe suggestions that:
+1. Use as many of my pantry items as possible
+2. Are high protein, low fat, low preservatives
+3. Are healthy and clean eating focused
+
+For each recipe, respond ONLY with a JSON array (no markdown, no preamble) in this exact format:
+[
+  {
+    "name": "Recipe Name",
+    "prepTime": "20 min",
+    "servings": 4,
+    "protein": "35g",
+    "fat": "8g",
+    "ingredients": [
+      {"item": "ingredient name", "amount": "quantity", "inPantry": true/false}
+    ],
+    "instructions": ["step 1", "step 2"],
+    "matchPercentage": 75
+  }
+]
+
+The matchPercentage should reflect what % of ingredients I already have. Sort by highest match percentage first.`
+          }],
+          temperature: 0.7,
+          max_tokens: 4000
+        })
+      });
+      
+      const data = await response.json();
+      let recipeText = data.choices[0].message.content;
+      
+      // Clean up response
+      recipeText = recipeText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      
+      const parsedRecipes = JSON.parse(recipeText);
+      setRecipes(parsedRecipes.map(r => ({ ...r, id: Date.now() + Math.random() })));
+    } catch (error) {
+      console.error('Error getting recipes:', error);
+      alert('Error generating recipes. Please check your Groq API key and try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Search recipes from TheMealDB
+  const searchRecipesFromDB = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setIsLoading(true);
+    
+    try {
+      // Search TheMealDB
+      const response = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${searchQuery}`);
+      const data = await response.json();
+      
+      if (!data.meals) {
+        alert('No recipes found. Try a different search term.');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Convert TheMealDB format to our format with AI enhancement
+      const mealDbRecipes = data.meals.slice(0, 3).map(meal => {
+        const ingredients = [];
+        for (let i = 1; i <= 20; i++) {
+          const ingredient = meal[`strIngredient${i}`];
+          const measure = meal[`strMeasure${i}`];
+          if (ingredient && ingredient.trim()) {
+            const inPantry = pantryItems.some(p => 
+              p.name.toLowerCase().includes(ingredient.toLowerCase()) ||
+              ingredient.toLowerCase().includes(p.name.toLowerCase())
+            );
+            ingredients.push({
+              item: ingredient.toLowerCase(),
+              amount: measure || '1',
+              inPantry
+            });
+          }
+        }
+        
+        const instructions = meal.strInstructions.split('\n').filter(s => s.trim());
+        const matchPercentage = Math.round((ingredients.filter(i => i.inPantry).length / ingredients.length) * 100);
+        
+        return {
+          id: Date.now() + Math.random(),
+          name: meal.strMeal,
+          prepTime: "30 min",
+          servings: 4,
+          protein: "25g",
+          fat: "12g",
+          ingredients,
+          instructions,
+          matchPercentage,
+          category: meal.strCategory,
+          area: meal.strArea,
+          thumbnail: meal.strMealThumb
+        };
+      });
+      
+      // Enhance with Groq AI for nutrition info if API key is available
+      if (groqApiKey) {
+        await enhanceRecipesWithAI(mealDbRecipes);
+      } else {
+        setRecipes(mealDbRecipes);
+      }
+    } catch (error) {
+      console.error('Error searching recipes:', error);
+      alert('Error searching recipes. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const enhanceRecipesWithAI = async (mealDbRecipes) => {
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${groqApiKey}`
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{
+            role: "user",
+            content: `For these recipes, provide accurate nutrition estimates (protein, fat in grams). Make them high protein, low fat focused. Return ONLY a JSON array with name, protein, fat fields:
+
+${mealDbRecipes.map(r => r.name).join('\n')}
+
+Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
+          }],
+          temperature: 0.3,
+          max_tokens: 500
+        })
+      });
+      
+      const data = await response.json();
+      let nutritionText = data.choices[0].message.content;
+      nutritionText = nutritionText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      
+      const nutritionData = JSON.parse(nutritionText);
+      
+      const enhanced = mealDbRecipes.map(recipe => {
+        const nutrition = nutritionData.find(n => n.name === recipe.name);
+        return nutrition ? { ...recipe, protein: nutrition.protein, fat: nutrition.fat } : recipe;
+      });
+      
+      setRecipes(enhanced);
+    } catch (error) {
+      console.error('Error enhancing recipes:', error);
+      setRecipes(mealDbRecipes);
+    }
+  };
+  
+  // Save recipe
+  const saveRecipe = async (recipe) => {
+    if (!supabase) return;
+    
+    if (savedRecipes.find(r => r.name === recipe.name)) {
+      alert('Recipe already saved!');
+      return;
+    }
+    
+    const { data, error } = await supabase.from('saved_recipes').insert([{
+      user_id: userId,
+      recipe_data: JSON.stringify(recipe),
+      created_at: new Date().toISOString()
+    }]).select();
+    
+    if (!error && data) {
+      setSavedRecipes([...savedRecipes, recipe]);
+    }
+  };
+  
+  const removeSavedRecipe = async (recipeName) => {
+    if (!supabase) return;
+    
+    const { error } = await supabase
+      .from('saved_recipes')
+      .delete()
+      .eq('user_id', userId)
+      .eq('recipe_data', JSON.stringify(savedRecipes.find(r => r.name === recipeName)));
+    
+    if (!error) {
+      setSavedRecipes(savedRecipes.filter(r => r.name !== recipeName));
+    }
+  };
+  
+  // Meal planning
+  const addToMealPlan = async (recipe) => {
+    if (!supabase) return;
+    
+    const recipeWithId = { ...recipe, plannedId: Date.now() + Math.random() };
+    
+    const { data, error } = await supabase.from('meal_plan').insert([{
+      user_id: userId,
+      recipe_data: JSON.stringify(recipeWithId),
+      created_at: new Date().toISOString()
+    }]).select();
+    
+    if (!error && data) {
+      setMealPlan([...mealPlan, recipeWithId]);
+      setActiveTab('mealPlan');
+    }
+  };
+  
+  const removeFromMealPlan = async (plannedId) => {
+    if (!supabase) return;
+    
+    const recipe = mealPlan.find(r => r.plannedId === plannedId);
+    
+    const { error } = await supabase
+      .from('meal_plan')
+      .delete()
+      .eq('user_id', userId)
+      .eq('recipe_data', JSON.stringify(recipe));
+    
+    if (!error) {
+      setMealPlan(mealPlan.filter(r => r.plannedId !== plannedId));
+    }
+  };
+  
+  const addMissingToShoppingList = async (recipe) => {
+    if (!supabase) return;
+    
+    const missingIngredients = recipe.ingredients.filter(ing => !ing.inPantry);
+    
+    if (missingIngredients.length === 0) {
+      alert('You have all ingredients for this recipe!');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Add ${missingIngredients.length} missing ingredients to shopping list?`
+    );
+    
+    if (confirmed) {
+      const newItems = missingIngredients.map(ing => ({
+        user_id: userId,
+        item: ing.item,
+        amount: ing.amount,
+        recipe: recipe.name,
+        purchased: false,
+        created_at: new Date().toISOString()
+      }));
+      
+      const { data, error } = await supabase.from('shopping_list').insert(newItems).select();
+      
+      if (!error && data) {
+        setShoppingList([...shoppingList, ...data]);
+        setActiveTab('shopping');
+      }
+    }
+  };
+  
+  const togglePurchased = async (id) => {
+    if (!supabase) return;
+    
+    const item = shoppingList.find(i => i.id === id);
+    const { error } = await supabase
+      .from('shopping_list')
+      .update({ purchased: !item.purchased })
+      .eq('id', id);
+    
+    if (!error) {
+      setShoppingList(shoppingList.map(i =>
+        i.id === id ? { ...i, purchased: !i.purchased } : i
+      ));
+    }
+  };
+  
+  const removeFromShopping = async (id) => {
+    if (!supabase) return;
+    
+    const { error } = await supabase.from('shopping_list').delete().eq('id', id);
+    
+    if (!error) {
+      setShoppingList(shoppingList.filter(item => item.id !== id));
+    }
+  };
+  
+  const clearPurchased = async () => {
+    if (!supabase) return;
+    
+    const purchasedIds = shoppingList.filter(i => i.purchased).map(i => i.id);
+    
+    const { error } = await supabase
+      .from('shopping_list')
+      .delete()
+      .in('id', purchasedIds);
+    
+    if (!error) {
+      setShoppingList(shoppingList.filter(item => !item.purchased));
+    }
+  };
+  
+  // Recurring Items Management
+  const addRecurringItem = async (item, amount, frequency = 'weekly') => {
+    if (!supabase || !item || !amount) return;
+    
+    const newItem = {
+      user_id: userId,
+      item: item.toLowerCase().trim(),
+      amount: amount,
+      frequency: frequency,
+      active: true,
+      created_at: new Date().toISOString()
+    };
+    
+    const { data, error } = await supabase.from('recurring_items').insert([newItem]).select();
+    
+    if (!error && data) {
+      setRecurringItems([...recurringItems, data[0]]);
+    }
+  };
+  
+  const removeRecurringItem = async (id) => {
+    if (!supabase) return;
+    
+    const { error } = await supabase.from('recurring_items').delete().eq('id', id);
+    
+    if (!error) {
+      setRecurringItems(recurringItems.filter(item => item.id !== id));
+    }
+  };
+  
+  const toggleRecurringActive = async (id) => {
+    if (!supabase) return;
+    
+    const item = recurringItems.find(i => i.id === id);
+    const { error } = await supabase
+      .from('recurring_items')
+      .update({ active: !item.active })
+      .eq('id', id);
+    
+    if (!error) {
+      setRecurringItems(recurringItems.map(i =>
+        i.id === id ? { ...i, active: !i.active } : i
+      ));
+    }
+  };
+  
+  const updateRecurringItem = async (id, field, value) => {
+    if (!supabase) return;
+    
+    const updates = { [field]: value };
+    const { error } = await supabase.from('recurring_items').update(updates).eq('id', id);
+    
+    if (!error) {
+      setRecurringItems(recurringItems.map(item => 
+        item.id === id ? { ...item, [field]: value } : item
+      ));
+    }
+  };
+  
+  const addActiveRecurringToShoppingList = async () => {
+    if (!supabase) return;
+    
+    const activeItems = recurringItems.filter(i => i.active);
+    
+    if (activeItems.length === 0) {
+      alert('No active recurring items to add!');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Add ${activeItems.length} recurring items to shopping list?`
+    );
+    
+    if (confirmed) {
+      const newItems = activeItems.map(item => ({
+        user_id: userId,
+        item: item.item,
+        amount: item.amount,
+        recipe: `Recurring (${item.frequency})`,
+        purchased: false,
+        created_at: new Date().toISOString()
+      }));
+      
+      const { data, error } = await supabase.from('shopping_list').insert(newItems).select();
+      
+      if (!error && data) {
+        setShoppingList([...shoppingList, ...data]);
+        alert(`Added ${activeItems.length} recurring items to shopping list!`);
+      }
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50">
+      <div className="max-w-6xl mx-auto p-6">
+        <header className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold text-emerald-800 flex items-center gap-3">
+                <ChefHat className="w-8 h-8" />
+                Smart Grocery & Meal Planner
+              </h1>
+              <p className="text-emerald-600 mt-2">AI-powered meal planning with cloud sync</p>
+            </div>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-3 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+        
+        {/* Settings Modal */}
+        {showSettings && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-emerald-800">Settings</h2>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Supabase URL
+                  </label>
+                  <input
+                    type="text"
+                    value={supabaseUrl}
+                    onChange={(e) => setSupabaseUrl(e.target.value)}
+                    placeholder="https://your-project.supabase.co"
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-emerald-600 mt-1">
+                    Get this from your Supabase project settings
+                  </p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Supabase Anon Key
+                  </label>
+                  <input
+                    type="password"
+                    value={supabaseKey}
+                    onChange={(e) => setSupabaseKey(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-emerald-600 mt-1">
+                    Your public anon/client key (safe to use in browser)
+                  </p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Groq API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={groqApiKey}
+                    onChange={(e) => setGroqApiKey(e.target.value)}
+                    placeholder="gsk_..."
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-emerald-600 mt-1">
+                    Get a free API key from console.groq.com
+                  </p>
+                </div>
+                
+                <div className="bg-emerald-50 p-4 rounded-lg">
+                  <h3 className="font-medium text-emerald-800 mb-2">Quick Setup Guide:</h3>
+                  <ol className="text-sm text-emerald-700 space-y-1 list-decimal list-inside">
+                    <li>Create account at supabase.com</li>
+                    <li>Create a new project</li>
+                    <li>Go to Project Settings → API</li>
+                    <li>Copy URL and anon/public key</li>
+                    <li>Get free Groq API key from console.groq.com</li>
+                  </ol>
+                </div>
+                
+                <button
+                  onClick={saveSettings}
+                  className="w-full py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+                >
+                  Save Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {!isConfigured ? (
+          <div className="bg-white rounded-2xl shadow-lg p-12 text-center">
+            <Settings className="w-16 h-16 mx-auto mb-4 text-emerald-300" />
+            <h2 className="text-2xl font-bold text-emerald-800 mb-2">Welcome!</h2>
+            <p className="text-emerald-600 mb-6">
+              Please configure your database and AI settings to get started
+            </p>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+            >
+              Configure Settings
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Navigation Tabs */}
+            <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+              {[
+                { id: 'pantry', label: 'Pantry Inventory', icon: Database },
+                { id: 'recipes', label: 'Recipe Suggestions', icon: ChefHat },
+                { id: 'saved', label: 'Saved Recipes', icon: Heart },
+                { id: 'mealPlan', label: 'Meal Plan', icon: Calendar },
+                { id: 'shopping', label: 'Shopping List', icon: ShoppingCart },
+                { id: 'recurring', label: 'Recurring Items', icon: Repeat }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${
+                    activeTab === tab.id
+                      ? 'bg-emerald-600 text-white shadow-lg'
+                      : 'bg-white text-emerald-700 hover:bg-emerald-50'
+                  }`}
+                >
+                  <tab.icon className="w-4 h-4" />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            
+            {/* Pantry Tab */}
+            {activeTab === 'pantry' && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h2 className="text-2xl font-bold text-emerald-800 mb-4">Your Pantry</h2>
+                
+                <div className="flex gap-3 mb-6 flex-wrap">
+                  <input
+                    type="text"
+                    placeholder="Item name"
+                    value={newItem.name}
+                    onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                    className="flex-1 min-w-[200px] px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Quantity"
+                    value={newItem.quantity}
+                    onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
+                    className="w-32 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <select
+                    value={newItem.unit}
+                    onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
+                    className="px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  >
+                    <option value="units">units</option>
+                    <option value="lbs">lbs</option>
+                    <option value="oz">oz</option>
+                    <option value="cups">cups</option>
+                    <option value="tbsp">tbsp</option>
+                    <option value="tsp">tsp</option>
+                  </select>
+                  <button
+                    onClick={addPantryItem}
+                    className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium"
+                  >
+                    <Plus className="w-4 h-4" /> Add
+                  </button>
+                </div>
+                
+                {pantryItems.length === 0 ? (
+                  <div className="text-center py-12 text-emerald-600">
+                    <Database className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>No items in your pantry yet. Add some to get started!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {pantryItems.map(item => (
+                      <div key={item.id} className="flex items-center gap-3 p-3 bg-emerald-50 rounded-lg">
+                        <input
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => updatePantryItem(item.id, 'name', e.target.value)}
+                          className="flex-1 px-3 py-1 bg-white border border-emerald-200 rounded"
+                        />
+                        <input
+                          type="number"
+                          value={item.quantity}
+                          onChange={(e) => updatePantryItem(item.id, 'quantity', parseFloat(e.target.value))}
+                          className="w-24 px-3 py-1 bg-white border border-emerald-200 rounded"
+                        />
+                        <select
+                          value={item.unit}
+                          onChange={(e) => updatePantryItem(item.id, 'unit', e.target.value)}
+                          className="px-3 py-1 bg-white border border-emerald-200 rounded"
+                        >
+                          <option value="units">units</option>
+                          <option value="lbs">lbs</option>
+                          <option value="oz">oz</option>
+                          <option value="cups">cups</option>
+                          <option value="tbsp">tbsp</option>
+                          <option value="tsp">tsp</option>
+                        </select>
+                        <button
+                          onClick={() => removePantryItem(item.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                <div className="mt-6 pt-6 border-t border-emerald-200">
+                  <button
+                    onClick={getRecipeSuggestions}
+                    disabled={isLoading || pantryItems.length === 0}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg hover:from-emerald-700 hover:to-teal-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? 'Generating Recipes...' : 'Get AI Recipe Suggestions'}
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* Recipes Tab */}
+            {activeTab === 'recipes' && (
+              <div className="space-y-6">
+                <div className="bg-white rounded-2xl shadow-lg p-6">
+                  <h2 className="text-2xl font-bold text-emerald-800 mb-4">Search Recipe Database</h2>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      placeholder="Search recipes (e.g., 'chicken', 'pasta', 'vegetarian')"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && searchRecipesFromDB()}
+                      className="flex-1 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={searchRecipesFromDB}
+                      disabled={isLoading}
+                      className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium disabled:opacity-50"
+                    >
+                      <Search className="w-4 h-4" /> Search
+                    </button>
+                  </div>
+                  <p className="text-xs text-emerald-600 mt-2">
+                    Powered by TheMealDB - thousands of free recipes
+                  </p>
+                </div>
+                
+                {isLoading && (
+                  <div className="text-center py-12 bg-white rounded-2xl shadow-lg">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+                    <p className="text-emerald-600">Finding the perfect recipes for you...</p>
+                  </div>
+                )}
+                
+                {!isLoading && recipes.length === 0 && (
+                  <div className="text-center py-12 bg-white rounded-2xl shadow-lg">
+                    <ChefHat className="w-16 h-16 mx-auto mb-4 text-emerald-300" />
+                    <p className="text-emerald-600">Use the search above or go to Pantry to get AI suggestions!</p>
+                  </div>
+                )}
+                
+                <div className="space-y-4">
+                  {recipes.map(recipe => (
+                    <RecipeCard 
+                      key={recipe.id} 
+                      recipe={recipe} 
+                      onSave={() => saveRecipe(recipe)}
+                      onAddToPlan={() => addToMealPlan(recipe)}
+                      onAddToShopping={() => addMissingToShoppingList(recipe)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Saved Recipes Tab */}
+            {activeTab === 'saved' && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h2 className="text-2xl font-bold text-emerald-800 mb-4">Saved Recipes</h2>
+                
+                {savedRecipes.length === 0 ? (
+                  <div className="text-center py-12 text-emerald-600">
+                    <Heart className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>No saved recipes yet. Save some from the Recipes tab!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {savedRecipes.map(recipe => (
+                      <RecipeCard 
+                        key={recipe.id} 
+                        recipe={recipe}
+                        onAddToPlan={() => addToMealPlan(recipe)}
+                        onAddToShopping={() => addMissingToShoppingList(recipe)}
+                        onDelete={() => removeSavedRecipe(recipe.name)}
+                        isSaved
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Meal Plan Tab */}
+            {activeTab === 'mealPlan' && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h2 className="text-2xl font-bold text-emerald-800 mb-4">Weekly Meal Plan</h2>
+                
+                {mealPlan.length === 0 ? (
+                  <div className="text-center py-12 text-emerald-600">
+                    <Calendar className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>No meals planned yet. Add recipes from the Recipes or Saved tabs!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {mealPlan.map(recipe => (
+                      <div key={recipe.plannedId} className="border border-emerald-200 rounded-lg p-4">
+                        <div className="flex justify-between items-start mb-3">
+                          <h3 className="text-lg font-bold text-emerald-800">{recipe.name}</h3>
+                          <button
+                            onClick={() => removeFromMealPlan(recipe.plannedId)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        
+                        <button
+                          onClick={() => addMissingToShoppingList(recipe)}
+                          className="w-full py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 flex items-center justify-center gap-2 font-medium"
+                        >
+                          <ShoppingCart className="w-4 h-4" />
+                          Add Missing Ingredients to Shopping List
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Shopping List Tab */}
+            {activeTab === 'shopping' && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-2xl font-bold text-emerald-800">Shopping List</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={addActiveRecurringToShoppingList}
+                      className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 text-sm font-medium flex items-center gap-2"
+                    >
+                      <Repeat className="w-4 h-4" />
+                      Add Recurring Items
+                    </button>
+                    {shoppingList.some(item => item.purchased) && (
+                      <button
+                        onClick={clearPurchased}
+                        className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-medium"
+                      >
+                        Clear Purchased
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                {shoppingList.length === 0 ? (
+                  <div className="text-center py-12 text-emerald-600">
+                    <ShoppingCart className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>Your shopping list is empty. Add items from your meal plan!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {shoppingList.map(item => (
+                      <div 
+                        key={item.id} 
+                        className={`flex items-center gap-3 p-3 rounded-lg ${
+                          item.purchased ? 'bg-gray-100' : 'bg-emerald-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.purchased}
+                          onChange={() => togglePurchased(item.id)}
+                          className="w-5 h-5 text-emerald-600 rounded"
+                        />
+                        <div className="flex-1">
+                          <p className={`font-medium ${item.purchased ? 'line-through text-gray-500' : 'text-emerald-800'}`}>
+                            {item.item} - {item.amount}
+                          </p>
+                          <p className="text-sm text-emerald-600">For: {item.recipe}</p>
+                        </div>
+                        <button
+                          onClick={() => removeFromShopping(item.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Recurring Items Tab */}
+            {activeTab === 'recurring' && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h2 className="text-2xl font-bold text-emerald-800 mb-4">Recurring Shopping Items</h2>
+                <p className="text-emerald-600 mb-6">Items you buy regularly (like milk, eggs, bread). Add them once and easily add to your shopping list each week!</p>
+                
+                <RecurringItemForm onAdd={addRecurringItem} />
+                
+                {recurringItems.length === 0 ? (
+                  <div className="text-center py-12 text-emerald-600">
+                    <Repeat className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>No recurring items yet. Add items you buy regularly!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {recurringItems.map(item => (
+                      <div 
+                        key={item.id} 
+                        className={`flex items-center gap-3 p-3 rounded-lg ${
+                          item.active ? 'bg-emerald-50' : 'bg-gray-100'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.active}
+                          onChange={() => toggleRecurringActive(item.id)}
+                          className="w-5 h-5 text-emerald-600 rounded"
+                          title={item.active ? 'Active - will be added to shopping list' : 'Inactive - skip for now'}
+                        />
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            value={item.item}
+                            onChange={(e) => updateRecurringItem(item.id, 'item', e.target.value)}
+                            className={`font-medium px-2 py-1 bg-white border border-emerald-200 rounded ${
+                              !item.active ? 'text-gray-500' : 'text-emerald-800'
+                            }`}
+                          />
+                          <div className="flex gap-2 items-center mt-1">
+                            <input
+                              type="text"
+                              value={item.amount}
+                              onChange={(e) => updateRecurringItem(item.id, 'amount', e.target.value)}
+                              className="text-sm text-emerald-600 px-2 py-1 bg-white border border-emerald-200 rounded w-24"
+                            />
+                            <select
+                              value={item.frequency}
+                              onChange={(e) => updateRecurringItem(item.id, 'frequency', e.target.value)}
+                              className="text-sm text-emerald-600 px-2 py-1 bg-white border border-emerald-200 rounded"
+                            >
+                              <option value="weekly">Weekly</option>
+                              <option value="biweekly">Bi-weekly</option>
+                              <option value="monthly">Monthly</option>
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeRecurringItem(item.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {recurringItems.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-emerald-200">
+                    <button
+                      onClick={addActiveRecurringToShoppingList}
+                      className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg hover:from-emerald-700 hover:to-teal-700 font-medium flex items-center justify-center gap-2"
+                    >
+                      <ShoppingCart className="w-5 h-5" />
+                      Add Active Items to Shopping List ({recurringItems.filter(i => i.active).length})
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Recurring Item Form Component
+function RecurringItemForm({ onAdd }) {
+  const [item, setItem] = useState('');
+  const [amount, setAmount] = useState('');
+  const [frequency, setFrequency] = useState('weekly');
+  
+  const handleSubmit = () => {
+    if (!item || !amount) {
+      alert('Please fill in item name and amount');
+      return;
+    }
+    
+    onAdd(item, amount, frequency);
+    setItem('');
+    setAmount('');
+    setFrequency('weekly');
+  };
+  
+  return (
+    <div className="bg-emerald-50 rounded-lg p-4 mb-6">
+      <h3 className="font-medium text-emerald-800 mb-3">Add New Recurring Item</h3>
+      <div className="flex gap-3 flex-wrap">
+        <input
+          type="text"
+          placeholder="Item name (e.g., milk, eggs)"
+          value={item}
+          onChange={(e) => setItem(e.target.value)}
+          className="flex-1 min-w-[200px] px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+        />
+        <input
+          type="text"
+          placeholder="Amount (e.g., 1 gallon)"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="w-40 px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+        />
+        <select
+          value={frequency}
+          onChange={(e) => setFrequency(e.target.value)}
+          className="px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+        >
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Bi-weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <button
+          onClick={handleSubmit}
+          className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium"
+        >
+          <Plus className="w-4 h-4" /> Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Recipe Card Component
+function RecipeCard({ recipe, onSave, onAddToPlan, onAddToShopping, onDelete, isSaved }) {
+  const [expanded, setExpanded] = useState(false);
+  
+  const missingCount = recipe.ingredients.filter(i => !i.inPantry).length;
+  
+  return (
+    <div className="bg-white border border-emerald-200 rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex justify-between items-start mb-3">
+        <div className="flex-1">
+          <h3 className="text-xl font-bold text-emerald-800">{recipe.name}</h3>
+          <div className="flex gap-4 mt-2 text-sm text-emerald-600 flex-wrap">
+            <span>⏱️ {recipe.prepTime}</span>
+            <span>🍽️ {recipe.servings} servings</span>
+            <span>💪 {recipe.protein} protein</span>
+            <span>🥑 {recipe.fat} fat</span>
+            {recipe.category && <span>🏷️ {recipe.category}</span>}
+            {recipe.area && <span>🌍 {recipe.area}</span>}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-bold text-emerald-600">{recipe.matchPercentage}%</div>
+          <div className="text-xs text-emerald-600">match</div>
+        </div>
+      </div>
+      
+      {recipe.thumbnail && (
+        <img 
+          src={recipe.thumbnail} 
+          alt={recipe.name}
+          className="w-full h-48 object-cover rounded-lg mb-3"
+        />
+      )}
+      
+      <div className="mb-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-emerald-700">Ingredients</span>
+          {missingCount > 0 && (
+            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
+              {missingCount} missing
+            </span>
+          )}
+        </div>
+        <div className="space-y-1">
+          {recipe.ingredients.slice(0, expanded ? undefined : 5).map((ing, idx) => (
+            <div key={idx} className={`text-sm flex items-center gap-2 ${ing.inPantry ? 'text-emerald-700' : 'text-amber-600'}`}>
+              <span>{ing.inPantry ? '✓' : '○'}</span>
+              <span>{ing.amount} {ing.item}</span>
+            </div>
+          ))}
+        </div>
+        {recipe.ingredients.length > 5 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-sm text-emerald-600 hover:underline mt-2"
+          >
+            {expanded ? 'Show less' : `Show ${recipe.ingredients.length - 5} more`}
+          </button>
+        )}
+      </div>
+      
+      {expanded && (
+        <div className="mb-3 p-3 bg-emerald-50 rounded-lg">
+          <h4 className="font-medium text-emerald-800 mb-2">Instructions</h4>
+          <ol className="list-decimal list-inside space-y-1 text-sm text-emerald-700">
+            {recipe.instructions.map((step, idx) => (
+              <li key={idx}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      
+      <div className="flex gap-2 flex-wrap">
+        {!isSaved && onSave && (
+          <button
+            onClick={onSave}
+            className="px-4 py-2 bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 flex items-center gap-2 text-sm font-medium"
+          >
+            <Heart className="w-4 h-4" /> Save
+          </button>
+        )}
+        <button
+          onClick={onAddToPlan}
+          className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-2 text-sm font-medium"
+        >
+          <Calendar className="w-4 h-4" /> Add to Meal Plan
+        </button>
+        <button
+          onClick={onAddToShopping}
+          className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 flex items-center gap-2 text-sm font-medium"
+        >
+          <ShoppingCart className="w-4 h-4" /> Shopping List
+        </button>
+        {isSaved && onDelete && (
+          <button
+            onClick={onDelete}
+            className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center gap-2 text-sm font-medium ml-auto"
+          >
+            <Trash2 className="w-4 h-4" /> Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default GroceryMealPlanner;
