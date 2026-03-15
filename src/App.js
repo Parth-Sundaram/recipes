@@ -612,46 +612,6 @@ Respond ONLY with a JSON array (no markdown, no preamble):
     }
   };
   
-  const enhanceRecipesWithAI = async (mealDbRecipes) => {
-    try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${groqApiKey}`
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{
-            role: "user",
-            content: `For these recipes, provide accurate nutrition estimates (protein, fat in grams). Make them high protein, low fat focused. Return ONLY a JSON array with name, protein, fat fields:
-
-${mealDbRecipes.map(r => r.name).join('\n')}
-
-Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
-          }],
-          temperature: 0.3,
-          max_tokens: 500
-        })
-      });
-      
-      const data = await response.json();
-      let nutritionText = data.choices[0].message.content;
-      nutritionText = nutritionText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      
-      const nutritionData = JSON.parse(nutritionText);
-      
-      const enhanced = mealDbRecipes.map(recipe => {
-        const nutrition = nutritionData.find(n => n.name === recipe.name);
-        return nutrition ? { ...recipe, protein: nutrition.protein, fat: nutrition.fat } : recipe;
-      });
-      
-      setRecipes(enhanced);
-    } catch (error) {
-      console.error('Error enhancing recipes:', error);
-      setRecipes(mealDbRecipes);
-    }
-  };
   
   // Save recipe
   const saveRecipe = async (recipe) => {
