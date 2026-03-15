@@ -53,15 +53,33 @@ function GroceryMealPlanner() {
       setSupabase(client);
       setIsConfigured(true);
       
-      // Check for existing session
-      client.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setUser(session.user);
-          loadAllData(client, session.user.id);
-        } else {
-          setShowAuth(true);
-        }
-      });
+      // Handle email confirmation from URL
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const accessToken = hashParams.get('access_token');
+      const type = hashParams.get('type');
+      
+      if (type === 'signup' && accessToken) {
+        // Email confirmed! Auto-login
+        client.auth.getSession().then(({ data: { session } }) => {
+          if (session?.user) {
+            setUser(session.user);
+            loadAllData(client, session.user.id);
+            // Clean up URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            alert('Email verified! Welcome to the app!');
+          }
+        });
+      } else {
+        // Check for existing session
+        client.auth.getSession().then(({ data: { session } }) => {
+          if (session?.user) {
+            setUser(session.user);
+            loadAllData(client, session.user.id);
+          } else {
+            setShowAuth(true);
+          }
+        });
+      }
       
       // Listen for auth changes
       client.auth.onAuthStateChange((_event, session) => {
