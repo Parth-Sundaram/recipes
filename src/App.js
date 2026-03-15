@@ -13,7 +13,11 @@ function GroceryMealPlanner() {
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [userId, setUserId] = useState('');
+  const [user, setUser] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   
   // Settings state
   const [supabaseUrl, setSupabaseUrl] = useState('');
@@ -25,13 +29,7 @@ function GroceryMealPlanner() {
   // New pantry item form
   const [newItem, setNewItem] = useState({ name: '', quantity: '', unit: 'units' });
   
-  const generateUserId = () => {
-    const id = 'user_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('userId', id);
-    return id;
-  };
-  
-  const loadAllData = useCallback(async (client) => {
+  const loadAllData = useCallback(async (client, userId) => {
     try {
       const { data: pantry } = await client.from('pantry').select('*').eq('user_id', userId);
       const { data: saved } = await client.from('saved_recipes').select('*').eq('user_id', userId);
@@ -47,14 +45,35 @@ function GroceryMealPlanner() {
     } catch (error) {
       console.error('Error loading data:', error);
     }
-  }, [userId]);
+  }, []);
   
   const initializeSupabase = useCallback((url, key) => {
     try {
       const client = createClient(url, key);
       setSupabase(client);
       setIsConfigured(true);
-      loadAllData(client);
+      
+      // Check for existing session
+      client.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          setUser(session.user);
+          loadAllData(client, session.user.id);
+        } else {
+          setShowAuth(true);
+        }
+      });
+      
+      // Listen for auth changes
+      client.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          setUser(session.user);
+          loadAllData(client, session.user.id);
+          setShowAuth(false);
+        } else {
+          setUser(null);
+          setShowAuth(true);
+        }
+      });
     } catch (error) {
       console.error('Error initializing Supabase:', error);
       alert('Error connecting to Supabase. Please check your credentials.');
@@ -66,13 +85,11 @@ function GroceryMealPlanner() {
     const savedUrl = localStorage.getItem('supabaseUrl');
     const savedKey = localStorage.getItem('supabaseKey');
     const savedGroqKey = localStorage.getItem('groqApiKey');
-    const savedUserId = localStorage.getItem('userId') || generateUserId();
     
     if (savedUrl && savedKey && savedGroqKey) {
       setSupabaseUrl(savedUrl);
       setSupabaseKey(savedKey);
       setGroqApiKey(savedGroqKey);
-      setUserId(savedUserId);
       initializeSupabase(savedUrl, savedKey);
     } else {
       setShowSettings(true);
@@ -93,12 +110,82 @@ function GroceryMealPlanner() {
     setShowSettings(false);
   };
   
+  // Auth Functions
+  const handleSignup = async () => {
+    if (!authEmail || !authPassword) {
+      alert('Please enter email and password');
+      return;
+    }
+    
+    if (authPassword.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: authEmail,
+        password: authPassword,
+      });
+      
+      if (error) throw error;
+      
+      alert('Account created! Please check your email to verify your account.');
+      setAuthEmail('');
+      setAuthPassword('');
+      setAuthMode('login');
+    } catch (error) {
+      alert('Error signing up: ' + error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const handleLogin = async () => {
+    if (!authEmail || !authPassword) {
+      alert('Please enter email and password');
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: authPassword,
+      });
+      
+      if (error) throw error;
+      
+      setAuthEmail('');
+      setAuthPassword('');
+    } catch (error) {
+      alert('Error logging in: ' + error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      setPantryItems([]);
+      setRecipes([]);
+      setSavedRecipes([]);
+      setMealPlan([]);
+      setShoppingList([]);
+      setRecurringItems([]);
+    } catch (error) {
+      alert('Error logging out: ' + error.message);
+    }
+  };
+  
   // Pantry Management
   const addPantryItem = async () => {
-    if (!newItem.name || !newItem.quantity || !supabase) return;
+    if (!newItem.name || !newItem.quantity || !supabase || !user) return;
     
     const item = { 
-      user_id: userId,
+      user_id: user.id,
       name: newItem.name.toLowerCase().trim(),
       quantity: parseFloat(newItem.quantity),
       unit: newItem.unit,
@@ -333,7 +420,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
     }
     
     const { data, error } = await supabase.from('saved_recipes').insert([{
-      user_id: userId,
+      user_id: user.id,
       recipe_data: JSON.stringify(recipe),
       created_at: new Date().toISOString()
     }]).select();
@@ -364,7 +451,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
     const recipeWithId = { ...recipe, plannedId: Date.now() + Math.random() };
     
     const { data, error } = await supabase.from('meal_plan').insert([{
-      user_id: userId,
+      user_id: user.id,
       recipe_data: JSON.stringify(recipeWithId),
       created_at: new Date().toISOString()
     }]).select();
@@ -407,7 +494,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
     
     if (confirmed) {
       const newItems = missingIngredients.map(ing => ({
-        user_id: userId,
+        user_id: user.id,
         item: ing.item,
         amount: ing.amount,
         recipe: recipe.name,
@@ -470,7 +557,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
     if (!supabase || !item || !amount) return;
     
     const newItem = {
-      user_id: userId,
+      user_id: user.id,
       item: item.toLowerCase().trim(),
       amount: amount,
       frequency: frequency,
@@ -540,7 +627,7 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
     
     if (confirmed) {
       const newItems = activeItems.map(item => ({
-        user_id: userId,
+        user_id: user.id,
         item: item.item,
         amount: item.amount,
         recipe: `Recurring (${item.frequency})`,
@@ -567,14 +654,27 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
                 <ChefHat className="w-8 h-8" />
                 Smart Grocery & Meal Planner
               </h1>
-              <p className="text-emerald-600 mt-2">AI-powered meal planning with cloud sync</p>
+              <p className="text-emerald-600 mt-2">
+                AI-powered meal planning with cloud sync
+                {user && <span className="ml-2">• {user.email}</span>}
+              </p>
             </div>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-3 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
+            <div className="flex gap-2">
+              {user && (
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-medium"
+                >
+                  Logout
+                </button>
+              )}
+              <button
+                onClick={() => setShowSettings(true)}
+                className="p-3 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </header>
         
@@ -658,6 +758,70 @@ Format: [{"name": "Recipe Name", "protein": "35g", "fat": "8g"}]`
                 >
                   Save Settings
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Login/Signup Modal */}
+        {showAuth && isConfigured && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+              <div className="text-center mb-6">
+                <ChefHat className="w-16 h-16 mx-auto mb-4 text-emerald-600" />
+                <h2 className="text-2xl font-bold text-emerald-800">
+                  {authMode === 'login' ? 'Welcome Back!' : 'Create Account'}
+                </h2>
+                <p className="text-emerald-600 mt-2">
+                  {authMode === 'login' ? 'Login to access your meal plans' : 'Sign up to start meal planning'}
+                </p>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && (authMode === 'login' ? handleLogin() : handleSignup())}
+                    placeholder="you@example.com"
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-emerald-700 mb-2">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && (authMode === 'login' ? handleLogin() : handleSignup())}
+                    placeholder={authMode === 'signup' ? 'Minimum 6 characters' : 'Your password'}
+                    className="w-full px-4 py-2 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                </div>
+                
+                <button
+                  onClick={authMode === 'login' ? handleLogin : handleSignup}
+                  disabled={isLoading}
+                  className="w-full py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:opacity-50"
+                >
+                  {isLoading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Sign Up')}
+                </button>
+                
+                <div className="text-center">
+                  <button
+                    onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+                    className="text-emerald-600 hover:underline text-sm"
+                  >
+                    {authMode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Login'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
