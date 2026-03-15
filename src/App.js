@@ -4,8 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_KEY;
-const GROQ_API_KEY = process.env.REACT_APP_GROQ_KEY;
-const SPOONACULAR_API_KEY = process.env.REACT_APP_SPOONACULAR_KEY;
+const GROQ_API_KEY = process.env.REACT_APP_GROQ_API_KEY;
+const SPOONACULAR_API_KEY = process.env.REACT_APP_SPOONACULAR_API_KEY;
 const EDAMAM_APP_ID = process.env.REACT_APP_EDAMAM_APP_ID;
 const EDAMAM_APP_KEY = process.env.REACT_APP_EDAMAM_APP_KEY;
 
@@ -795,9 +795,6 @@ function GroceryMealPlanner() {
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-emerald-800 mb-4">Recurring Shopping Items</h2>
             <p className="text-emerald-600 mb-2">Items you buy regularly (like milk, eggs, bread). Add them once and easily add to your shopping list each week!</p>
-            <p className="text-xs text-emerald-500 mb-6">
-              💡 <strong>Auto-schedule tip:</strong> To automate weekly additions, enable the Supabase Edge Function in <code>supabase/functions/recurring-scheduler/index.ts</code> and set a cron trigger in your Supabase dashboard under Edge Functions → Schedule.
-            </p>
             <RecurringItemForm onAdd={addRecurringItem} />
             {recurringItems.length === 0 ? (
               <div className="text-center py-12 text-emerald-600">
