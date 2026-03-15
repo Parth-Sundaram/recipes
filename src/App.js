@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Plus, Trash2, Search, Heart, Calendar, ShoppingCart, ChefHat,
   Database, X, Repeat, Edit2, Check, PlusCircle, Share2, Utensils,
-  Sparkles, BarChart2, FlameIcon
+  Sparkles, BarChart2
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
